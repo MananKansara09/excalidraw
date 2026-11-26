@@ -176,6 +176,8 @@ export const openDatabase = (path: string): DB => {
   // a small preview image (data URL) the editor renders when it saves
   ensureColumn(db, "scenes", "thumbnail", "TEXT");
   ensureColumn(db, "scenes", "thumbnail_at", "INTEGER");
+  // 'full' links open the whole scene; 'presentation' links only its slides
+  ensureColumn(db, "share_links", "kind", "TEXT NOT NULL DEFAULT 'full'");
   return db;
 };
 

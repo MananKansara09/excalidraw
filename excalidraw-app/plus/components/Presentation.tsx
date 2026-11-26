@@ -3,6 +3,7 @@ import { useUIAppState } from "@excalidraw/excalidraw/context/ui-appState";
 import { CaptureUpdateAction } from "@excalidraw/excalidraw";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import type { ExcalidrawElement } from "@excalidraw/element/types";
 import type {
   AppState,
   ExcalidrawImperativeAPI,
@@ -17,7 +18,9 @@ import {
 import { cloudSession } from "../cloud";
 import {
   cloudSceneAtom,
+  connectionIdAtom,
   localPresentationOrderAtom,
+  participantsAtom,
   plusDialogAtom,
   presentationAtom,
 } from "../state";
@@ -62,6 +65,8 @@ export const PresentationPanel = ({
   const frames = getOrderedFrames(elements, order);
   const scene = useAtomValue(cloudSceneAtom);
   const canReorder = !scene || scene.role !== "viewer";
+  const participants = useAtomValue(participantsAtom);
+  const live = participants.find((p) => p.presenting);
 
   if (!frames.length) {
     return (
@@ -98,7 +103,20 @@ export const PresentationPanel = ({
           label="Export PDF / PPTX"
           onClick={() => setDialog({ name: "export-frames" })}
         />
+        {scene?.role === "owner" && (
+          <FilledButton
+            variant="outlined"
+            label="Share presentation"
+            onClick={() => setDialog({ name: "share" })}
+          />
+        )}
       </div>
+      {live && (
+        <p className="plus-live-note">
+          <span className="plus-live-badge">Live</span> {live.name} is
+          presenting
+        </p>
+      )}
       <ol className="plus-slides">
         {frames.map((frame, index) => (
           <li key={frame.id} className="plus-slide">
@@ -166,16 +184,51 @@ type SavedState = Pick<
   "viewModeEnabled" | "zenModeEnabled" | "frameRendering" | "openSidebar"
 >;
 
-/** Full-screen slideshow over the canvas, one frame per slide. */
+const sameFrames = (a: readonly Frame[], b: readonly Frame[]) =>
+  a.length === b.length &&
+  a.every((f, i) => f.id === b[i].id && f.version === b[i].version);
+
+/**
+ * Full-screen slideshow over the canvas, one frame per slide.
+ *
+ * Whoever starts it from an editable scene is the presenter: the slide they
+ * are on is announced to everyone else in the scene. Everyone else watches:
+ * their slides follow the presenter until they navigate on their own, and
+ * they can jump back. Opening a public presentation link is always watching,
+ * for as long as the page is open.
+ */
 export const PresentationMode = ({ api }: { api: ExcalidrawImperativeAPI }) => {
   const [presentation, setPresentation] = useAtom(presentationAtom);
+  const scene = useAtomValue(cloudSceneAtom);
+  const participants = useAtomValue(participantsAtom);
+  const connectionId = useAtomValue(connectionIdAtom);
+  const [order] = usePresentationOrder();
   const [frames, setFrames] = useState<Frame[]>([]);
+  const [following, setFollowing] = useState(true);
   const saved = useRef<SavedState | null>(null);
-  const { active, index } = presentation;
+  const announced = useRef(false);
+
+  // a public presentation link is nothing but the presentation
+  const persistent = !!scene?.slidesOnly;
+  const active = presentation.active || persistent;
+  const watching = persistent || !!presentation.watching;
+  const { index } = presentation;
+  const presenter = participants.find(
+    (p) => p.presenting && p.connectionId !== connectionId,
+  );
 
   const exit = useCallback(() => {
-    setPresentation({ active: false, index: 0 });
-  }, [setPresentation]);
+    if (!persistent) {
+      setPresentation({ active: false, index: 0 });
+    }
+  }, [persistent, setPresentation]);
+
+  // public links start on their own; leaving the scene ends it
+  useEffect(() => {
+    if (persistent && !presentation.active) {
+      setPresentation({ active: true, index: 0, watching: true });
+    }
+  }, [persistent, presentation.active, setPresentation]);
 
   // enter / leave
   useEffect(() => {
@@ -183,11 +236,12 @@ export const PresentationMode = ({ api }: { api: ExcalidrawImperativeAPI }) => {
       return;
     }
     const ordered = getOrderedFrames(api.getSceneElements(), getCurrentOrder());
-    if (!ordered.length) {
+    if (!ordered.length && !persistent) {
       exit();
       return;
     }
     setFrames(ordered);
+    setFollowing(true);
     const appState = api.getAppState();
     saved.current = {
       viewModeEnabled: appState.viewModeEnabled,
@@ -211,7 +265,9 @@ export const PresentationMode = ({ api }: { api: ExcalidrawImperativeAPI }) => {
       captureUpdate: CaptureUpdateAction.NEVER,
     });
     document.body.classList.add("plus-presenting");
-    document.documentElement.requestFullscreen?.().catch(() => {});
+    if (!persistent) {
+      document.documentElement.requestFullscreen?.().catch(() => {});
+    }
 
     const onFullscreenChange = () => {
       if (!document.fullscreenElement) {
@@ -241,7 +297,21 @@ export const PresentationMode = ({ api }: { api: ExcalidrawImperativeAPI }) => {
         animation: true,
       });
     };
-  }, [active, api, exit]);
+  }, [active, persistent, api, exit]);
+
+  // slides added, removed or reordered while presenting (by a collaborator,
+  // or as the presenter edits a deck that's being watched)
+  useEffect(() => {
+    if (!active) {
+      return;
+    }
+    const refresh = (elements: readonly ExcalidrawElement[]) => {
+      const next = getOrderedFrames(elements, getCurrentOrder());
+      setFrames((current) => (sameFrames(current, next) ? current : next));
+    };
+    refresh(api.getSceneElements());
+    return api.onChange((elements) => refresh(elements));
+  }, [active, api, order]);
 
   const frame = frames[Math.min(index, frames.length - 1)];
 
@@ -257,13 +327,102 @@ export const PresentationMode = ({ api }: { api: ExcalidrawImperativeAPI }) => {
     }
   }, [active, frame, api]);
 
+  // presenter: tell everyone in the scene we're live, and which slide
+  const canAnnounce = !watching && !!scene && !!connectionId;
+  useEffect(() => {
+    if (!active || !canAnnounce) {
+      return;
+    }
+    announced.current = false;
+    let cancelled = false;
+    cloudSession
+      .announcePresentation(
+        "presentation-start",
+        appJotaiStore.get(presentationAtom).index,
+      )
+      .then(() => {
+        announced.current = !cancelled;
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          // someone else is already presenting: watch them instead
+          api.setToast({ message: error.message, closable: true });
+          setPresentation((current) => ({ ...current, watching: true }));
+        }
+      });
+    return () => {
+      cancelled = true;
+      if (announced.current) {
+        announced.current = false;
+        cloudSession
+          .announcePresentation("presentation-stop", 0)
+          .catch(() => {});
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, canAnnounce, api, setPresentation]);
+
+  useEffect(() => {
+    if (active && canAnnounce && announced.current) {
+      cloudSession.announcePresentation("follow-slide", index).catch(() => {});
+    }
+  }, [active, canAnnounce, index]);
+
+  // watcher: move along with the presenter until they go their own way
+  const presenterSlide = presenter?.slide;
+  const isPresenterLive = !!presenter;
+  useEffect(() => {
+    if (
+      active &&
+      watching &&
+      following &&
+      isPresenterLive &&
+      presenterSlide !== undefined &&
+      frames.length
+    ) {
+      const target = Math.min(presenterSlide, frames.length - 1);
+      setPresentation((current) =>
+        current.index === target ? current : { ...current, index: target },
+      );
+    }
+  }, [
+    active,
+    watching,
+    following,
+    isPresenterLive,
+    presenterSlide,
+    frames.length,
+    setPresentation,
+  ]);
+
+  // the presenter starting again after a pause is followed again
+  useEffect(() => {
+    if (!presenter) {
+      setFollowing(true);
+    }
+  }, [presenter]);
+
   const go = useCallback(
-    (delta: number) =>
+    (delta: number) => {
+      if (watching) {
+        setFollowing(false);
+      }
       setPresentation((current) => ({
         ...current,
         index: Math.max(0, Math.min(frames.length - 1, current.index + delta)),
-      })),
-    [frames.length, setPresentation],
+      }));
+    },
+    [frames.length, watching, setPresentation],
+  );
+
+  const goTo = useCallback(
+    (target: number) => {
+      if (watching) {
+        setFollowing(false);
+      }
+      setPresentation((current) => ({ ...current, index: target }));
+    },
+    [watching, setPresentation],
   );
 
   useEffect(() => {
@@ -279,15 +438,15 @@ export const PresentationMode = ({ api }: { api: ExcalidrawImperativeAPI }) => {
       } else if (back.includes(event.key)) {
         go(-1);
       } else if (event.key === "Home") {
-        setPresentation((current) => ({ ...current, index: 0 }));
+        goTo(0);
       } else if (event.key === "End") {
-        setPresentation((current) => ({
-          ...current,
-          index: frames.length - 1,
-        }));
+        goTo(Math.max(0, frames.length - 1));
       } else if (event.key === "Escape") {
+        if (persistent) {
+          return;
+        }
         exit();
-      } else if (event.key.toLowerCase() === "l") {
+      } else if (event.key.toLowerCase() === "l" && !watching) {
         api.setActiveTool({ type: "laser" });
       } else {
         return;
@@ -297,16 +456,30 @@ export const PresentationMode = ({ api }: { api: ExcalidrawImperativeAPI }) => {
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [active, go, exit, api, frames.length, setPresentation]);
+  }, [active, go, goTo, exit, api, frames.length, persistent, watching]);
 
   const names = useMemo(
     () => frames.map((f, i) => getFrameName(f, i)),
     [frames],
   );
 
-  if (!active || !frame) {
+  if (!active) {
     return null;
   }
+
+  if (!frame) {
+    // a public link to a deck with no slides (yet)
+    return (
+      <div className="plus-presenter plus-presenter--empty" role="status">
+        {presenter
+          ? `${presenter.name} is presenting…`
+          : "This presentation has no slides yet."}
+      </div>
+    );
+  }
+
+  const current = Math.min(index, frames.length - 1);
+  const offTrack = watching && !!presenter && !following;
 
   return (
     <div
@@ -314,32 +487,80 @@ export const PresentationMode = ({ api }: { api: ExcalidrawImperativeAPI }) => {
       role="toolbar"
       aria-label="Presentation controls"
     >
+      {watching && (
+        <span
+          className="plus-presenter__status"
+          title={
+            presenter
+              ? `${presenter.name} is presenting`
+              : "Waiting for the presenter"
+          }
+        >
+          {presenter ? (
+            <>
+              <span className="plus-live-badge">Live</span>
+              {presenter.name}
+            </>
+          ) : (
+            <span className="plus-muted">Waiting for the presenter</span>
+          )}
+        </span>
+      )}
+      {!watching && connectionId && scene && (
+        <span className="plus-presenter__status" title="Others can watch">
+          <span className="plus-live-badge">Live</span>
+          {Math.max(0, participants.length - 1)} watching
+        </span>
+      )}
       <button
         onClick={() => go(-1)}
-        disabled={index === 0}
+        disabled={current === 0}
         aria-label="Previous slide"
       >
         ←
       </button>
-      <span className="plus-presenter__count" title={names[index]}>
-        {index + 1} / {frames.length}
+      <span className="plus-presenter__count" title={names[current]}>
+        {current + 1} / {frames.length}
       </span>
       <button
         onClick={() => go(1)}
-        disabled={index >= frames.length - 1}
+        disabled={current >= frames.length - 1}
         aria-label="Next slide"
       >
         →
       </button>
-      <button
-        onClick={() => api.setActiveTool({ type: "laser" })}
-        title="Laser pointer (L)"
-      >
-        Laser
-      </button>
-      <button onClick={exit} title="Exit (Esc)">
-        Exit
-      </button>
+      {offTrack && (
+        <button
+          onClick={() => setFollowing(true)}
+          title={`Jump to ${presenter!.name}'s slide`}
+        >
+          Follow
+        </button>
+      )}
+      {!watching && (
+        <button
+          onClick={() => api.setActiveTool({ type: "laser" })}
+          title="Laser pointer (L)"
+        >
+          Laser
+        </button>
+      )}
+      {persistent ? (
+        <button
+          onClick={() =>
+            document.fullscreenElement
+              ? document.exitFullscreen().catch(() => {})
+              : document.documentElement.requestFullscreen?.().catch(() => {})
+          }
+          title="Toggle full screen"
+        >
+          Full screen
+        </button>
+      ) : (
+        <button onClick={exit} title="Exit (Esc)">
+          Exit
+        </button>
+      )}
     </div>
   );
 };

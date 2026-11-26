@@ -33,6 +33,7 @@ describe("cloud participant profile & follow", () => {
       presentation: [],
       shareToken: null,
       embed: false,
+      slidesOnly: false,
     });
     appJotaiStore.set(connectionIdAtom, "conn-me");
     appJotaiStore.set(participantsAtom, [
@@ -43,6 +44,8 @@ describe("cloud participant profile & follow", () => {
         color: "#ffd8a8",
         inHangout: false,
         sharingScreen: false,
+        presenting: false,
+        slide: 0,
       },
     ]);
     appJotaiStore.set(
@@ -160,6 +163,8 @@ describe("cloud participant profile & follow", () => {
         color: "#ffd8a8",
         inHangout: false,
         sharingScreen: false,
+        presenting: false,
+        slide: 0,
       },
     ]);
 

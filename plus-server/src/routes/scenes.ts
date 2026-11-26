@@ -21,10 +21,12 @@ import {
 import { BROADCAST_SIGNALS, TARGETED_SIGNALS } from "../realtime.ts";
 import {
   createScene,
+  filesForElements,
   getSceneFiles,
   listScenes,
   sceneDetail,
   sceneSummary,
+  slidesView,
   updateSceneContent,
 } from "../scenes.ts";
 
@@ -41,10 +43,15 @@ import type { AppContext } from "../context.ts";
 import type { Request, Router } from "../http.ts";
 import type { Connection } from "../realtime.ts";
 
-import type { FolderRow, SceneRow } from "../access.ts";
+import type { FolderRow, SceneRole, SceneRow } from "../access.ts";
 import type { User } from "../auth.ts";
 
 export const sceneChannel = (sceneId: string) => `scene:${sceneId}`;
+
+const slideIndex = (value: unknown) =>
+  typeof value === "number" && Number.isInteger(value) && value >= 0
+    ? Math.min(value, 10_000)
+    : 0;
 
 /** Checks the caller may put a scene or folder in this team/folder. */
 const resolveLocation = (
@@ -130,10 +137,11 @@ const loadComment = (ctx: AppContext, commentId: string) => {
 
 const shareLinkJSON = (
   ctx: AppContext,
-  link: { token: string; role: string; created_at: number },
+  link: { token: string; role: string; kind: string; created_at: number },
 ) => ({
   token: link.token,
   role: link.role,
+  kind: link.kind,
   createdAt: link.created_at,
   url: ctx.config.publicUrl
     ? `${ctx.config.publicUrl}/#share=${link.token}`
@@ -256,16 +264,18 @@ export const registerSceneRoutes = (router: Router, ctx: AppContext) => {
 
   router.get("/api/v1/scenes/:sceneId", (req) => {
     const user = getUser(db, req);
-    const { scene, role } = loadSceneForRole(
+    const { scene, role, slidesOnly } = loadSceneForRole(
       db,
       req,
       user,
       req.params.sceneId,
       "viewer",
+      { allowSlidesOnly: true },
     );
     return {
       scene: sceneDetail(db, scene, role, {
         includeFiles: req.query.get("files") !== "0",
+        slidesOnly,
       }),
     };
   });
@@ -357,9 +367,19 @@ export const registerSceneRoutes = (router: Router, ctx: AppContext) => {
 
   router.get("/api/v1/scenes/:sceneId/files", (req) => {
     const user = getUser(db, req);
-    loadSceneForRole(db, req, user, req.params.sceneId, "viewer");
+    const { scene, slidesOnly } = loadSceneForRole(
+      db,
+      req,
+      user,
+      req.params.sceneId,
+      "viewer",
+      { allowSlidesOnly: true },
+    );
     const ids = req.query.get("ids")?.split(",").filter(Boolean);
-    const files = getSceneFiles(db, req.params.sceneId);
+    let files = getSceneFiles(db, scene.id);
+    if (slidesOnly) {
+      files = filesForElements(files, slidesView(JSON.parse(scene.elements)));
+    }
     return {
       files: ids
         ? Object.fromEntries(
@@ -523,7 +543,7 @@ export const registerSceneRoutes = (router: Router, ctx: AppContext) => {
       })),
       links: all<any>(
         db,
-        "SELECT token, role, created_at FROM share_links WHERE scene_id = ? ORDER BY created_at",
+        "SELECT token, role, kind, created_at FROM share_links WHERE scene_id = ? ORDER BY created_at",
         sceneId,
       ).map((link) => shareLinkJSON(ctx, link)),
     };
@@ -623,16 +643,25 @@ export const registerSceneRoutes = (router: Router, ctx: AppContext) => {
       "owner",
     );
     const body = await req.body();
-    const role = requireOneOf(body.role ?? "viewer", "role", [
-      "editor",
-      "viewer",
+    const kind = requireOneOf(body.kind ?? "full", "kind", [
+      "full",
+      "presentation",
     ] as const);
+    // a presentation link never edits, whatever role was asked for
+    const role =
+      kind === "presentation"
+        ? "viewer"
+        : requireOneOf(body.role ?? "viewer", "role", [
+            "editor",
+            "viewer",
+          ] as const);
     run(
       db,
-      "INSERT INTO share_links (token, scene_id, role, created_by, created_at) VALUES (?, ?, ?, ?, ?)",
+      "INSERT INTO share_links (token, scene_id, role, kind, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)",
       newId(18),
       scene.id,
       role,
+      kind,
       user.id,
       now(),
     );
@@ -659,15 +688,55 @@ export const registerSceneRoutes = (router: Router, ctx: AppContext) => {
 
   /** Resolves a share link to its scene; public, the token is the secret. */
   router.get("/api/v1/share/:token", (req) => {
-    const link = get<{ scene_id: string; role: string }>(
+    const link = get<{ scene_id: string; role: string; kind: string }>(
       db,
-      "SELECT scene_id, role FROM share_links WHERE token = ?",
+      "SELECT scene_id, role, kind FROM share_links WHERE token = ?",
       req.params.token,
     );
     if (!link) {
       throw notFound("This link doesn't exist or was revoked");
     }
-    return { sceneId: link.scene_id, role: link.role };
+    return {
+      sceneId: link.scene_id,
+      role: link.role,
+      kind: link.kind,
+      live: !!hub.presenter(sceneChannel(link.scene_id)),
+    };
+  });
+
+  /**
+   * Presentations running right now in scenes the caller can open, so they
+   * can jump in and watch.
+   */
+  router.get("/api/v1/presentations/live", (req) => {
+    const user = requireUser(db, req);
+    const live = hub.presentingChannels();
+    if (!live.size) {
+      return { presentations: [] };
+    }
+    return {
+      presentations: listScenes(db, user, { scope: "all" }).flatMap((scene) => {
+        const entry = live.get(sceneChannel(scene.id));
+        if (!entry) {
+          return [];
+        }
+        return [
+          {
+            sceneId: scene.id,
+            name: scene.name,
+            presenter: entry.presenter.name,
+            slide: entry.presenter.slide,
+            viewers: entry.viewers,
+            hasPublicLink:
+              get(
+                db,
+                "SELECT 1 AS found FROM share_links WHERE scene_id = ? AND kind = 'presentation'",
+                scene.id,
+              ) !== undefined,
+          },
+        ];
+      }),
+    };
   });
 
   // folders --------------------------------------------------------------------
@@ -1210,22 +1279,24 @@ export const registerSceneRoutes = (router: Router, ctx: AppContext) => {
 
   router.get("/api/v1/scenes/:sceneId/events", (req, res) => {
     const user = getUser(db, req);
-    const { scene } = loadSceneForRole(
+    const { scene, slidesOnly } = loadSceneForRole(
       db,
       req,
       user,
       req.params.sceneId,
       "viewer",
+      { allowSlidesOnly: true },
     );
     const name =
       user?.name ||
       (req.query.get("name") || "").trim().slice(0, 50) ||
       "Guest";
-    hub.connectSSE(sceneChannel(scene.id), res, {
-      id: user?.id ?? null,
-      name,
-      avatarUrl: user?.avatar_url ?? null,
-    });
+    hub.connectSSE(
+      sceneChannel(scene.id),
+      res,
+      { id: user?.id ?? null, name, avatarUrl: user?.avatar_url ?? null },
+      { restricted: slidesOnly },
+    );
   });
 
   /**
@@ -1234,15 +1305,19 @@ export const registerSceneRoutes = (router: Router, ctx: AppContext) => {
    */
   router.post("/api/v1/scenes/:sceneId/signal", async (req) => {
     const user = getUser(db, req);
-    const { scene } = loadSceneForRole(
+    const { scene, role, slidesOnly } = loadSceneForRole(
       db,
       req,
       user,
       req.params.sceneId,
       "viewer",
+      { allowSlidesOnly: true },
     );
     const body = await req.body();
-    return relaySignal(ctx, scene.id, user?.id ?? null, body);
+    return relaySignal(ctx, scene.id, user?.id ?? null, body, {
+      role,
+      slidesOnly,
+    });
   });
 };
 
@@ -1287,6 +1362,7 @@ export const relaySignal = (
   sceneId: string,
   userId: string | null,
   body: any,
+  access: { role: SceneRole; slidesOnly: boolean },
 ) => {
   const { hub } = ctx;
   const channel = sceneChannel(sceneId);
@@ -1299,6 +1375,20 @@ export const relaySignal = (
     ...BROADCAST_SIGNALS,
   ]);
   const message = { type, from: from.id, data: body.data ?? null };
+
+  // only people who can edit run a presentation; everyone else follows
+  if (
+    type === "presentation-start" &&
+    (access.slidesOnly || access.role === "viewer")
+  ) {
+    throw forbidden("You have view-only access to this scene");
+  }
+  if (type === "presentation-start") {
+    const current = hub.presenter(channel);
+    if (current && current.id !== from.id) {
+      throw badRequest(`${current.name} is already presenting`);
+    }
+  }
 
   if ((TARGETED_SIGNALS as readonly string[]).includes(type)) {
     const to = hub.get(channel, requireString(body.to, "to"));
@@ -1318,6 +1408,17 @@ export const relaySignal = (
   } else if (type === "screen-share-start" || type === "screen-share-stop") {
     from.sharingScreen = type === "screen-share-start";
     hub.broadcastPresence(channel);
+  } else if (type === "presentation-start" || type === "presentation-stop") {
+    from.presenting = type === "presentation-start";
+    from.slide = from.presenting ? slideIndex(body.data?.index) : 0;
+    hub.broadcastPresence(channel);
+  } else if (type === "follow-slide") {
+    // only the running presentation's presenter moves everyone's slide
+    if (!from.presenting) {
+      throw forbidden("You aren't presenting");
+    }
+    from.slide = slideIndex(body.data?.index);
+    message.data = { index: from.slide };
   }
   hub.broadcast(channel, "signal", message, from.id);
   return { ok: true };
@@ -1372,9 +1473,12 @@ export const handleSceneSocket = (
   };
 
   let user;
+  let slidesOnly = false;
   try {
     user = getUser(db, req);
-    loadSceneForRole(db, req, user, sceneId, "viewer");
+    ({ slidesOnly } = loadSceneForRole(db, req, user, sceneId, "viewer", {
+      allowSlidesOnly: true,
+    }));
   } catch (error) {
     if (error instanceof HttpError) {
       rejectUpgrade(socket, error.status, error.message);
@@ -1397,6 +1501,7 @@ export const handleSceneSocket = (
     sceneChannel(sceneId),
     ws,
     { id: user?.id ?? null, name, avatarUrl: user?.avatar_url ?? null },
+    { restricted: slidesOnly },
   );
 
   const reply = (event: string, data: unknown) =>
@@ -1426,13 +1531,21 @@ export const handleSceneSocket = (
         });
         reply("sync-ack", { id: message.id, ...result });
       } else if (message.type === "signal") {
-        loadSceneForRole(db, req, current, sceneId, "viewer");
-        relaySignal(ctx, sceneId, current?.id ?? null, {
-          from: connection.id,
-          to: message.to,
-          type: message.signal,
-          data: message.data,
+        const access = loadSceneForRole(db, req, current, sceneId, "viewer", {
+          allowSlidesOnly: true,
         });
+        relaySignal(
+          ctx,
+          sceneId,
+          current?.id ?? null,
+          {
+            from: connection.id,
+            to: message.to,
+            type: message.signal,
+            data: message.data,
+          },
+          access,
+        );
       } else if (message.type === "ping") {
         reply("pong", { t: message.t ?? null });
       }

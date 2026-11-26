@@ -29,6 +29,16 @@ export type Connection = {
   transport: Transport;
   inHangout: boolean;
   sharingScreen: boolean;
+  /** Joined through a presentation-only link: gets slides, never the scene. */
+  restricted: boolean;
+  /** This connection is running a presentation, on slide `slide`. */
+  presenting: boolean;
+  slide: number;
+};
+
+export type ConnectOptions = {
+  /** Presentation-only viewer: see `Connection.restricted`. */
+  restricted?: boolean;
 };
 
 /** Drop clients that fall this far behind rather than buffering forever. */
@@ -42,6 +52,8 @@ export type Participant = {
   color: string;
   inHangout: boolean;
   sharingScreen: boolean;
+  presenting: boolean;
+  slide: number;
 };
 
 const COLORS = [
@@ -70,6 +82,8 @@ export const BROADCAST_SIGNALS = [
   "screen-share-start",
   "screen-share-stop",
   "pointer",
+  "presentation-start",
+  "presentation-stop",
   "follow-slide",
 ] as const;
 
@@ -104,6 +118,7 @@ export class RealtimeHub {
     channel: string,
     res: ServerResponse,
     user: { id: string | null; name: string; avatarUrl?: string | null },
+    options: ConnectOptions = {},
   ): Connection {
     res.writeHead(200, {
       "Content-Type": "text/event-stream",
@@ -121,6 +136,7 @@ export class RealtimeHub {
         backlog: () => res.writableLength,
       },
       user,
+      options,
     );
     res.on("close", () => this.disconnect(connection));
     return connection;
@@ -131,6 +147,7 @@ export class RealtimeHub {
     channel: string,
     socket: WebSocketConnection,
     user: { id: string | null; name: string; avatarUrl?: string | null },
+    options: ConnectOptions = {},
   ): Connection {
     const connection = this.connect(
       channel,
@@ -148,6 +165,7 @@ export class RealtimeHub {
         backlog: () => socket.bufferedAmount(),
       },
       user,
+      options,
     );
     socket.onClose(() => this.disconnect(connection));
     return connection;
@@ -157,6 +175,7 @@ export class RealtimeHub {
     channel: string,
     transport: Transport,
     user: { id: string | null; name: string; avatarUrl?: string | null },
+    { restricted = false }: ConnectOptions = {},
   ): Connection {
     let connections = this.channels.get(channel);
     if (!connections) {
@@ -173,6 +192,9 @@ export class RealtimeHub {
       transport,
       inHangout: false,
       sharingScreen: false,
+      restricted,
+      presenting: false,
+      slide: 0,
     };
     connections.set(connection.id, connection);
     this.send(connection, "hello", {
@@ -215,7 +237,31 @@ export class RealtimeHub {
       color: c.color,
       inHangout: c.inHangout,
       sharingScreen: c.sharingScreen,
+      presenting: c.presenting,
+      slide: c.slide,
     }));
+  }
+
+  /** The connection currently presenting on a channel, if any. */
+  presenter(channel: string) {
+    for (const connection of this.channels.get(channel)?.values() ?? []) {
+      if (connection.presenting) {
+        return connection;
+      }
+    }
+    return null;
+  }
+
+  /** Channels with a live presentation. */
+  presentingChannels() {
+    const live = new Map<string, { presenter: Connection; viewers: number }>();
+    for (const [channel, connections] of this.channels) {
+      const presenter = this.presenter(channel);
+      if (presenter) {
+        live.set(channel, { presenter, viewers: connections.size - 1 });
+      }
+    }
+    return live;
   }
 
   /** Pushes updated profile fields (name / avatarUrl) to live rooms. */
@@ -248,6 +294,24 @@ export class RealtimeHub {
   }
 
   send(connection: Connection, event: string, data: unknown) {
+    if (connection.restricted) {
+      // Presentation-only viewers learn that the scene changed and re-fetch
+      // their filtered copy; they never get its elements or comments, nor
+      // pointers other than the presenter's.
+      if (event === "scene-update") {
+        event = "scene-refresh";
+        data = {};
+      } else if (event === "comment") {
+        return;
+      } else if (
+        event === "signal" &&
+        (data as { type?: string })?.type === "pointer" &&
+        !this.get(connection.channel, (data as { from: string }).from)
+          ?.presenting
+      ) {
+        return;
+      }
+    }
     if (connection.transport.backlog() > MAX_BACKLOG_BYTES) {
       // too slow to keep up; it reconnects and resyncs from the database
       connection.transport.close();

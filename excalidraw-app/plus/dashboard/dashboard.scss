@@ -925,3 +925,88 @@
     border-color: var(--dash-primary);
   }
 }
+
+// live presentations ------------------------------------------------------------
+
+.dash-live-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #fff;
+  background: #e03131;
+
+  &::before {
+    content: "";
+    width: 0.4rem;
+    height: 0.4rem;
+    border-radius: 50%;
+    background: currentColor;
+    animation: dash-live-pulse 1.4s ease-in-out infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    &::before {
+      animation: none;
+    }
+  }
+}
+
+.dash-card__live {
+  position: absolute;
+  top: 0.5rem;
+  left: 0.5rem;
+}
+
+.dash-live {
+  margin: 0 0 1.75rem;
+
+  &__list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  &__item {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.7rem 0.9rem;
+    border: 1px solid var(--dash-border);
+    border-radius: 10px;
+    background: var(--dash-panel);
+  }
+
+  &__main {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  &__name {
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__sub {
+    font-size: 0.8rem;
+    color: var(--dash-muted);
+  }
+}
+
+@keyframes dash-live-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}

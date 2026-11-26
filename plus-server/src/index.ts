@@ -62,6 +62,13 @@ const { server, ctx } = createApp({
     secureCookies: env.PLUS_SECURE_COOKIES === "true",
     publicUrl: env.PLUS_PUBLIC_URL?.replace(/\/$/, "") || null,
     iceServers: parseIceServers(env.PLUS_ICE_SERVERS),
+    claudeBridge:
+      env.CLAUDE_BRIDGE_URL && env.CLAUDE_BRIDGE_SECRET
+        ? {
+            url: env.CLAUDE_BRIDGE_URL.replace(/\/$/, ""),
+            secret: env.CLAUDE_BRIDGE_SECRET,
+          }
+        : null,
   },
   ai: createAnthropicProvider(
     (env.PLUS_AI_EFFORT as "low" | "medium" | "high" | undefined) || "medium",

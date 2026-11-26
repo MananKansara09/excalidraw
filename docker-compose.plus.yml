@@ -15,6 +15,11 @@ services:
     environment:
       PLUS_PUBLIC_URL: https://${DOMAIN}
       PLUS_SECURE_COOKIES: "true"
+      # the in-app Claude chat: requests are proxied to the bridge below
+      CLAUDE_BRIDGE_URL: http://claude-bridge:3016
+      CLAUDE_BRIDGE_SECRET: ${CLAUDE_BRIDGE_SECRET:?set CLAUDE_BRIDGE_SECRET in .env.plus}
+    depends_on:
+      - claude-bridge
     # localhost only: the host's Caddy is the public entry point
     ports:
       - "127.0.0.1:${PLUS_PORT:-3015}:3015"
@@ -66,5 +71,20 @@ services:
     ports:
       - "127.0.0.1:${ROOM_PORT:-3002}:3002"
 
+  # Runs the Claude Agent SDK for the in-app Claude chat. Every Plus user signs
+  # in to their OWN Claude account from the UI; their login is kept in its own
+  # directory on the claude-data volume. Not published: only `plus` can reach it.
+  claude-bridge:
+    build:
+      context: .
+      dockerfile: claude-bridge/Dockerfile
+    restart: unless-stopped
+    environment:
+      CLAUDE_BRIDGE_SECRET: ${CLAUDE_BRIDGE_SECRET:?set CLAUDE_BRIDGE_SECRET in .env.plus}
+      CLAUDE_BRIDGE_MAX_CONCURRENT: ${CLAUDE_BRIDGE_MAX_CONCURRENT:-8}
+    volumes:
+      - claude-data:/data
+
 volumes:
   plus-data:
+  claude-data:

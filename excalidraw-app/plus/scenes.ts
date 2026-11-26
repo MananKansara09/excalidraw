@@ -18,6 +18,16 @@ export const openCloudScene = (sceneId: string) => {
   }
 };
 
+/** Opens a cloud scene and joins its live presentation as a watcher. */
+export const watchCloudPresentation = (sceneId: string) => {
+  const hash = `${cloudSceneHash(sceneId)}&watch=1`;
+  if (window.location.pathname === "/") {
+    window.location.hash = hash;
+  } else {
+    window.location.assign(`/${hash}`);
+  }
+};
+
 /** Uploads the current canvas as a new cloud scene. */
 export const saveCanvasToCloud = async (
   api: ExcalidrawImperativeAPI,

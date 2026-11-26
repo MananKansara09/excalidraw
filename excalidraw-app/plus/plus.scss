@@ -1593,6 +1593,106 @@
       font-variant-numeric: tabular-nums;
       padding: 0 0.4rem;
     }
+
+    &__status {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-size: 0.8rem;
+      padding: 0 0.5rem 0 0.4rem;
+      max-width: 14rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    // a public link with nothing to show yet
+    &--empty {
+      padding: 0.6rem 1.1rem;
+      font-size: 0.9rem;
+      opacity: 1;
+    }
+  }
+
+  // live presentations ------------------------------------------------------------
+
+  .plus-live-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    margin-left: 0.4rem;
+    padding: 0.05rem 0.45rem;
+    border-radius: 999px;
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #fff;
+    background: #e03131;
+
+    &::before {
+      content: "";
+      width: 0.4rem;
+      height: 0.4rem;
+      border-radius: 50%;
+      background: currentColor;
+      animation: plus-live-pulse 1.4s ease-in-out infinite;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      &::before {
+        animation: none;
+      }
+    }
+  }
+
+  .plus-presenter__status .plus-live-badge {
+    margin-left: 0;
+  }
+
+  .plus-live-note {
+    margin: 0;
+    font-size: 0.85rem;
+  }
+
+  .plus-live-list {
+    margin-bottom: 0.75rem;
+    padding: 0.6rem 0.75rem;
+    border: var(--plus-border);
+    border-radius: var(--plus-radius);
+
+    h3 {
+      margin: 0 0 0.4rem;
+      font-size: 0.85rem;
+    }
+
+    ul {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+    }
+
+    li {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    &__main {
+      flex: 1 1 auto;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+    }
+  }
+
+  @keyframes plus-live-pulse {
+    50% {
+      opacity: 0.35;
+    }
   }
 
   // hangout screens -------------------------------------------------------------
@@ -1652,6 +1752,14 @@ body.plus-presenting .excalidraw {
   }
 }
 
+// the Claude assistant isn't part of the editor, so it needs hiding too
+body.plus-presenting {
+  .claude-fab,
+  .claude-panel {
+    display: none !important;
+  }
+}
+
 // cloud scenes list everyone (with call state) in the Plus top bar, so the
 // editor's own collaborator list would duplicate it
 .excalidraw-app.is-cloud-scene .excalidraw .UserList {
@@ -1665,5 +1773,179 @@ body.plus-presenting .excalidraw {
   .layer-ui__wrapper__footer-right,
   .main-menu-trigger {
     display: none !important;
+  }
+}
+
+// Claude chat ----------------------------------------------------------------
+
+.excalidraw {
+  .claude-chat {
+    --claude-gradient: linear-gradient(
+      135deg,
+      #7c3aed 0%,
+      #c026d3 55%,
+      #ec4899 100%
+    );
+
+    position: fixed;
+    inset: auto 0 1rem 0;
+    z-index: 5;
+    pointer-events: none;
+    display: flex;
+    justify-content: center;
+
+    > * {
+      pointer-events: all;
+    }
+
+    &__fab {
+      position: fixed;
+      right: 1rem;
+      bottom: 4.5rem;
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      height: 2.75rem;
+      padding: 0 1.1rem;
+      border: 0;
+      border-radius: 999px;
+      background: var(--claude-gradient);
+      color: #fff;
+      font: 600 0.95rem var(--ui-font, sans-serif);
+      cursor: pointer;
+      box-shadow: 0 6px 18px rgba(192, 38, 211, 0.4);
+      transition: transform 0.15s, box-shadow 0.15s;
+
+      &:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 8px 22px rgba(192, 38, 211, 0.5);
+      }
+    }
+
+    &__stack {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      width: min(34rem, calc(100vw - 2rem));
+      margin-right: 7rem;
+    }
+
+    &__log {
+      max-height: min(50vh, 26rem);
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      padding: 0.75rem;
+      border-radius: 16px;
+      border: var(--plus-border);
+      background: var(--island-bg-color);
+      box-shadow: var(--shadow-island);
+    }
+
+    &__msg {
+      align-self: flex-start;
+      max-width: 90%;
+      font-size: 0.875rem;
+      line-height: 1.4;
+
+      &.is-user {
+        align-self: flex-end;
+        padding: 0.4rem 0.8rem;
+        border-radius: 14px 14px 2px 14px;
+        background: var(--claude-gradient);
+        color: #fff;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+    }
+
+    &__text {
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    &__code {
+      margin: 0.4rem 0;
+      padding: 0.5rem;
+      max-height: 10rem;
+      overflow: auto;
+      border-radius: 8px;
+      background: var(--color-surface-low, rgba(127, 127, 127, 0.12));
+      font-size: 0.75rem;
+    }
+
+    &__insert {
+      border: 0;
+      padding: 0.3rem 0.8rem;
+      border-radius: 999px;
+      background: var(--claude-gradient);
+      color: #fff;
+      font: 600 0.8rem var(--ui-font, sans-serif);
+      cursor: pointer;
+
+      &:disabled {
+        opacity: 0.7;
+        cursor: default;
+      }
+    }
+
+    &__typing {
+      color: var(--plus-muted);
+      font-size: 0.8rem;
+    }
+
+    &__error {
+      color: var(--plus-danger);
+      font-size: 0.8rem;
+    }
+
+    &__bar {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      height: 3rem;
+      padding: 0 0.5rem 0 0.9rem;
+      border-radius: 999px;
+      border: 2px solid transparent;
+      background: linear-gradient(
+            var(--island-bg-color),
+            var(--island-bg-color)
+          )
+          padding-box,
+        var(--claude-gradient) border-box;
+      box-shadow: var(--shadow-island);
+
+      input {
+        flex: 1;
+        min-width: 0;
+        border: 0;
+        outline: 0;
+        background: transparent;
+        color: var(--text-primary-color);
+        font: 0.95rem var(--ui-font, sans-serif);
+      }
+    }
+
+    &__bar-icon {
+      display: flex;
+      color: #c026d3;
+    }
+
+    &__send {
+      width: 2.1rem;
+      height: 2.1rem;
+      border: 0;
+      border-radius: 50%;
+      background: var(--claude-gradient);
+      color: #fff;
+      font-size: 1.1rem;
+      cursor: pointer;
+
+      &:disabled {
+        opacity: 0.4;
+        cursor: default;
+      }
+    }
   }
 }

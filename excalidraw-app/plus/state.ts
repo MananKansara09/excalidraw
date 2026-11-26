@@ -30,6 +30,8 @@ export type CloudScene = {
   shareToken: string | null;
   /** Rendered inside an iframe embed: view-only, no chrome. */
   embed: boolean;
+  /** Opened through a presentation link: only the slides, nothing else. */
+  slidesOnly: boolean;
 };
 
 export const cloudSceneAtom = atom<CloudScene | null>(null);
@@ -51,6 +53,9 @@ export type Participant = {
   color: string;
   inHangout: boolean;
   sharingScreen: boolean;
+  /** Running a presentation, currently on slide `slide`. */
+  presenting: boolean;
+  slide: number;
 };
 
 export const participantsAtom = atom<Participant[]>([]);
@@ -68,6 +73,8 @@ export const activeCommentIdAtom = atom<string | null>(null);
 export const presentationAtom = atom<{
   active: boolean;
   index: number;
+  /** Watching someone else's presentation instead of driving one. */
+  watching?: boolean;
 }>({ active: false, index: 0 });
 
 /** Frame order for presenting scenes that aren't in the cloud. */

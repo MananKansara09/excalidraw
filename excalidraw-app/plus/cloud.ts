@@ -6,7 +6,7 @@ import {
   zoomToFitBounds,
 } from "@excalidraw/excalidraw";
 import { getCollaboratorActivityLabel } from "@excalidraw/excalidraw/clients";
-import { throttleRAF } from "@excalidraw/common";
+import { debounce, throttleRAF } from "@excalidraw/common";
 import { getVisibleSceneBounds } from "@excalidraw/element";
 import throttle from "lodash.throttle";
 
@@ -72,6 +72,25 @@ export const cloudSceneHash = (sceneId: string) => `#cloud=${sceneId}`;
 /** `&comment=<id>` of a link to one comment thread. */
 export const parseCommentHash = (hash = window.location.hash) =>
   new URLSearchParams(hash.replace(/^#/, "")).get("comment");
+
+/**
+ * `&watch=1`: open the scene and watch its live presentation (the dashboard's
+ * "Watch" button). Read once, then dropped from the URL so a reload doesn't
+ * keep re-joining it.
+ */
+export const consumeWatchHash = (hash = window.location.hash) => {
+  const params = new URLSearchParams(hash.replace(/^#/, ""));
+  if (params.get("watch") !== "1") {
+    return false;
+  }
+  params.delete("watch");
+  window.history.replaceState(
+    null,
+    "",
+    `${window.location.pathname}${window.location.search}#${params}`,
+  );
+  return true;
+};
 
 /** A link that opens the current scene with one comment thread shown. */
 export const commentLinkURL = (commentId: string) => {
@@ -231,7 +250,9 @@ class CloudSession {
       teamId: scene.teamId,
       presentation: scene.presentation,
       shareToken: hash.shareToken,
-      embed: hash.embed,
+      // a presentation-only link is shown like an embed: slides, no chrome
+      embed: hash.embed || !!scene.slidesOnly,
+      slidesOnly: !!scene.slidesOnly,
     };
     this.syncedVersions = new Map(
       scene.elements.map((element: ExcalidrawElement) => [
@@ -580,6 +601,9 @@ class CloudSession {
     }
   }
 
+  /** Presentation-only viewers aren't sent edits; they re-fetch their slides. */
+  private refreshSlides = debounce(() => this.resync(), 250);
+
   /** Server → client events, whichever transport delivered them. */
   private handleEvent(type: string, data: any) {
     switch (type) {
@@ -612,6 +636,10 @@ class CloudSession {
         this.syncCollaboratorsWithPresence(participants);
         // newcomers learn where everyone's pointer and selection are
         this.sendPointer();
+        break;
+      }
+      case "scene-refresh": {
+        this.refreshSlides();
         break;
       }
       case "scene-update": {
@@ -682,6 +710,14 @@ class CloudSession {
         if (message.type === "viewport") {
           this.onRemoteViewport(message.from, message.data);
           return;
+        }
+        if (message.type === "follow-slide") {
+          const slide = Number(message.data?.index) || 0;
+          appJotaiStore.set(participantsAtom, (participants) =>
+            participants.map((p) =>
+              p.connectionId === message.from ? { ...p, slide } : p,
+            ),
+          );
         }
         this.signalListeners.forEach((listener) => listener(message));
         break;
@@ -852,6 +888,7 @@ class CloudSession {
       "hello",
       "presence",
       "scene-update",
+      "scene-refresh",
       "scene-meta",
       "comment",
       "signal",
@@ -1310,6 +1347,25 @@ class CloudSession {
     if (this.canEdit()) {
       await plusAPI.updateScene(this.scene.id, { presentation: frameIds });
     }
+  }
+
+  /**
+   * Tells everyone else this tab is presenting (and which slide). Starting
+   * goes over HTTP so a refusal (someone else is presenting, view-only
+   * access) comes back to the caller; the WebSocket doesn't report errors.
+   */
+  async announcePresentation(
+    type: "presentation-start" | "presentation-stop" | "follow-slide",
+    index: number,
+  ) {
+    if (type !== "presentation-start") {
+      return this.signal(type, { index });
+    }
+    const from = appJotaiStore.get(connectionIdAtom);
+    if (!this.scene || !from) {
+      throw new Error("Not connected to the scene");
+    }
+    await plusAPI.signal(this.scene.id, { from, type, data: { index } });
   }
 
   // signaling ------------------------------------------------------------------

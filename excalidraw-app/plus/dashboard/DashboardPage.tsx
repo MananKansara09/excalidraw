@@ -9,13 +9,19 @@ import { MentionsPanel } from "../components/MentionsPanel";
 import { TeamPanel } from "../components/TeamPanel";
 import { AvatarContent, timeAgo, useAsyncAction } from "../components/ui";
 import { folderAncestry, folderDescendants, folderTree } from "../folders";
-import { openCloudScene } from "../scenes";
+import { openCloudScene, watchCloudPresentation } from "../scenes";
 
 import { FormModal, ModalProvider, useModal } from "./Modal";
 
 import "./dashboard.scss";
 
-import type { Folder, PlusUser, SceneSummary, TeamSummary } from "../api";
+import type {
+  Folder,
+  LivePresentation,
+  PlusUser,
+  SceneSummary,
+  TeamSummary,
+} from "../api";
 
 type View =
   | { kind: "scenes" }
@@ -146,6 +152,22 @@ const Dashboard = ({
   const [folders, setFolders] = useState<Folder[]>([]);
   const [scenes, setScenes] = useState<SceneSummary[]>([]);
   const [loaded, setLoaded] = useState(false);
+  // presentations running right now, refreshed while the page is open
+  const [live, setLive] = useState<LivePresentation[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = () =>
+      plusAPI
+        .livePresentations()
+        .then((result) => !cancelled && setLive(result.presentations))
+        .catch(() => {});
+    refresh();
+    const interval = setInterval(refresh, 10_000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, []);
   const [view, setView] = useState<View>({
     kind: openTeamId ? "members" : "scenes",
   });
@@ -938,6 +960,33 @@ const Dashboard = ({
               </div>
             )}
 
+            {live.length > 0 && (
+              <section className="dash-live" aria-label="Presenting now">
+                <h2 className="dash-subheading">
+                  <span className="dash-live-badge">Live</span> Presenting now
+                </h2>
+                <ul className="dash-live__list">
+                  {live.map((item) => (
+                    <li key={item.sceneId} className="dash-live__item">
+                      <span className="dash-live__main">
+                        <span className="dash-live__name">{item.name}</span>
+                        <span className="dash-live__sub">
+                          {item.presenter} · {item.viewers} watching
+                          {item.hasPublicLink ? " · public link on" : ""}
+                        </span>
+                      </span>
+                      <button
+                        className="dash-btn dash-btn--primary"
+                        onClick={() => watchCloudPresentation(item.sceneId)}
+                      >
+                        Watch
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+
             {loaded && !searching && subFolders.length > 0 && (
               <>
                 <h2 className="dash-subheading">
@@ -998,6 +1047,7 @@ const Dashboard = ({
                     isDragging={dragging?.id === scene.id}
                     manageable={view.kind === "scenes" && canManage(scene)}
                     editable={view.kind === "scenes"}
+                    live={live.some((item) => item.sceneId === scene.id)}
                     onOpen={() => openCloudScene(scene.id)}
                     onDragStart={(event) => {
                       event.dataTransfer.setData(DRAG_TYPE, scene.id);
@@ -1179,6 +1229,7 @@ const SceneCard = ({
   isDragging,
   manageable,
   editable,
+  live,
   onOpen,
   onDragStart,
   onDragEnd,
@@ -1193,6 +1244,7 @@ const SceneCard = ({
   isDragging: boolean;
   manageable: boolean;
   editable: boolean;
+  live: boolean;
   onOpen: () => void;
   onDragStart: (event: React.DragEvent) => void;
   onDragEnd: () => void;
@@ -1247,6 +1299,7 @@ const SceneCard = ({
           </span>
         )}
         <span className="dash-card__time">{timeAgo(scene.updatedAt)}</span>
+        {live && <span className="dash-live-badge dash-card__live">Live</span>}
       </button>
       {editable && !editing && (
         <div className="dash-card__quick">
