@@ -4,6 +4,7 @@ import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 
 import { plusAPI } from "./api";
 import { cloudSceneHash } from "./cloud";
+import { uploadThumbnail } from "./thumbnail";
 
 import type { PlusFile } from "./api";
 
@@ -46,5 +47,7 @@ export const saveCanvasToCloud = async (
     appState: { viewBackgroundColor: api.getAppState().viewBackgroundColor },
     files,
   });
+  // a preview for the dashboard: best effort, but done before leaving
+  await uploadThumbnail(api, scene.id);
   return scene;
 };

@@ -3,11 +3,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { STORAGE_KEYS } from "../../app_constants";
 import { appJotaiStore, Provider } from "../../app-jotai";
-import { plusAPI, PlusAPIError } from "../api";
+import { plusAPI, PlusAPIError, sceneThumbnailURL } from "../api";
 import { goToSignIn } from "../auth";
 import { MentionsPanel } from "../components/MentionsPanel";
 import { TeamPanel } from "../components/TeamPanel";
 import { AvatarContent, timeAgo, useAsyncAction } from "../components/ui";
+import { folderAncestry, folderDescendants, folderTree } from "../folders";
 import { openCloudScene } from "../scenes";
 
 import { FormModal, ModalProvider, useModal } from "./Modal";
@@ -82,6 +83,9 @@ const ICONS = {
   more: "M5 12h.01M12 12h.01M19 12h.01",
   sort: "M7 4v16M7 20l-3-3M7 20l3-3M17 20V4M17 4l-3 3M17 4l3 3",
   chevron: "M6 9l6 6 6-6",
+  chevronRight: "M9 6l6 6-6 6",
+  folderPlus:
+    "M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM12 11v6M9 14h6",
 };
 
 // page ------------------------------------------------------------------------
@@ -150,6 +154,10 @@ const Dashboard = ({
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SortKey>("created");
   const [dragging, setDragging] = useState<SceneSummary | null>(null);
+  const [draggingFolder, setDraggingFolder] = useState<Folder | null>(null);
+  /** Collections whose sub-collections are hidden in the sidebar. */
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
+  const [movingFolder, setMovingFolder] = useState<Folder | null>(null);
   const [dropKey, setDropKey] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [movingScene, setMovingScene] = useState<SceneSummary | null>(null);
@@ -227,24 +235,51 @@ const Dashboard = ({
   const canManage = (scene: SceneSummary) =>
     scene.ownerId === user.id || (!!team && team.role !== "member");
 
-  // collections as a depth-first list, so nested ones can be indented
-  const collections = useMemo(() => {
-    const out: { folder: Folder; depth: number }[] = [];
-    const walk = (parentId: string | null, depth: number) => {
-      folders
-        .filter((folder) => folder.parentId === parentId)
-        .sort((a, b) => a.name.localeCompare(b.name))
-        .forEach((folder) => {
-          out.push({ folder, depth });
-          walk(folder.id, depth + 1);
-        });
-    };
-    walk(null, 0);
-    return out;
-  }, [folders]);
+  // collections as a depth-first list, nested ones indented; the ones inside
+  // a collapsed collection are left out
+  const tree = useMemo(() => folderTree(folders), [folders]);
+  const collections = useMemo(
+    () =>
+      tree.filter(
+        ({ folder }) =>
+          !folderAncestry(folders, folder.id)
+            .slice(0, -1)
+            .some((ancestor) => collapsed.has(ancestor.id)),
+      ),
+    [tree, folders, collapsed],
+  );
+
+  const toggleCollapsed = (id: string) =>
+    setCollapsed((current) => {
+      const next = new Set(current);
+      if (!next.delete(id)) {
+        next.add(id);
+      }
+      return next;
+    });
+
+  /** Opens a collection, revealing it in the sidebar if it was tucked away. */
+  const openCollection = (id: string | null) => {
+    setView({ kind: "scenes" });
+    setFolderId(id);
+    setQuery("");
+    const ancestors = folderAncestry(folders, id).slice(0, -1);
+    if (ancestors.some((ancestor) => collapsed.has(ancestor.id))) {
+      setCollapsed((current) => {
+        const next = new Set(current);
+        ancestors.forEach((ancestor) => next.delete(ancestor.id));
+        return next;
+      });
+    }
+  };
 
   const countIn = (id: string | null) =>
     scenes.filter((scene) => scene.folderId === id).length;
+
+  const breadcrumb = folderAncestry(folders, folderId);
+  const subFolders = folders
+    .filter((folder) => folder.parentId === folderId)
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   const currentFolder = folders.find((folder) => folder.id === folderId);
   const searching = query.trim().length > 0 && view.kind !== "mentions";
@@ -267,14 +302,14 @@ const Dashboard = ({
 
   const folderName = (id: string | null) =>
     id
-      ? folders.find((folder) => folder.id === id)?.name ?? "Collection"
+      ? tree.find(({ folder }) => folder.id === id)?.path ?? "Collection"
       : rootName;
 
   // actions -------------------------------------------------------------------
 
-  const createCollection = async () => {
+  const createCollection = async (parent: Folder | null = null) => {
     const name = await modal.prompt({
-      title: "New collection",
+      title: parent ? `New collection in “${parent.name}”` : "New collection",
       label: "Name",
       placeholder: "e.g. Wireframes",
       description: team
@@ -286,12 +321,33 @@ const Dashboard = ({
       return;
     }
     const result = await run(() =>
-      plusAPI.createFolder({ name, parentId: null, teamId }),
+      plusAPI.createFolder({ name, parentId: parent?.id ?? null, teamId }),
     );
     if (result) {
       await load();
-      setFolderId(result.folder.id);
+      openCollection(result.folder.id);
     }
+  };
+
+  const moveCollection = async (folder: Folder, parentId: string | null) => {
+    if (
+      parentId === folder.parentId ||
+      parentId === folder.id ||
+      (parentId && folderDescendants(folders, folder.id).has(parentId))
+    ) {
+      return;
+    }
+    const previous = folders;
+    setFolders((current) =>
+      current.map((f) => (f.id === folder.id ? { ...f, parentId } : f)),
+    );
+    const moved = await run(() =>
+      plusAPI.updateFolder(folder.id, { parentId }),
+    );
+    if (!moved) {
+      setFolders(previous);
+    }
+    load();
   };
 
   const renameCollection = async (folder: Folder) => {
@@ -307,16 +363,25 @@ const Dashboard = ({
   };
 
   const deleteCollection = async (folder: Folder) => {
+    const nestedCount = folderDescendants(folders, folder.id).size;
     const ok = await modal.confirm({
       title: "Delete collection",
-      message: `Delete “${folder.name}”? Its scenes move to ${rootName}.`,
+      message: nestedCount
+        ? `Delete “${folder.name}” and its ${nestedCount} sub-collection${
+            nestedCount === 1 ? "" : "s"
+          }? Their scenes move to ${rootName}.`
+        : `Delete “${folder.name}”? Its scenes move to ${rootName}.`,
       submitLabel: "Delete",
       danger: true,
     });
     if (ok) {
       const deleted = await run(() => plusAPI.deleteFolder(folder.id));
-      if (deleted !== undefined && folderId === folder.id) {
-        setFolderId(null);
+      if (
+        deleted !== undefined &&
+        breadcrumb.some((ancestor) => ancestor.id === folder.id)
+      ) {
+        // the open collection was inside the deleted one
+        setFolderId(folder.parentId);
       }
       load();
     }
@@ -440,10 +505,32 @@ const Dashboard = ({
 
   // drag and drop -------------------------------------------------------------
 
+  /** Can what's being dragged be dropped here? */
+  const canDrop = (destination: Destination) => {
+    if (dragging) {
+      return true;
+    }
+    if (draggingFolder) {
+      // a collection can only move within its own workspace, and not into
+      // itself or what's inside it
+      return (
+        destination.teamId === teamId &&
+        destination.folderId !== draggingFolder.id &&
+        !(
+          destination.folderId &&
+          folderDescendants(folders, draggingFolder.id).has(
+            destination.folderId,
+          )
+        )
+      );
+    }
+    return false;
+  };
+
   const dropTarget = (key: string, destination: Destination) => ({
     "data-drop-key": key,
     onDragOver: (event: React.DragEvent) => {
-      if (!dragging) {
+      if (!canDrop(destination)) {
         return;
       }
       event.preventDefault();
@@ -457,11 +544,16 @@ const Dashboard = ({
     },
     onDrop: (event: React.DragEvent) => {
       event.preventDefault();
+      event.stopPropagation();
       const scene = dragging;
+      const folder = draggingFolder;
       setDropKey(null);
       setDragging(null);
+      setDraggingFolder(null);
       if (scene) {
         moveScene(scene, destination);
+      } else if (folder && canDrop(destination)) {
+        moveCollection(folder, destination.folderId);
       }
     },
   });
@@ -619,7 +711,7 @@ const Dashboard = ({
                 <h3>Collections</h3>
                 <button
                   className="dash-icon-btn dash-icon-btn--primary"
-                  onClick={createCollection}
+                  onClick={() => createCollection(null)}
                   aria-label="New collection"
                   title="New collection"
                 >
@@ -633,11 +725,7 @@ const Dashboard = ({
                       active: view.kind === "scenes" && folderId === null,
                       "is-drop": dropKey === "root",
                     })}
-                    onClick={() => {
-                      setView({ kind: "scenes" });
-                      setFolderId(null);
-                      setQuery("");
-                    }}
+                    onClick={() => openCollection(null)}
                     {...dropTarget("root", { teamId, folderId: null })}
                   >
                     <Icon d={team ? ICONS.users : ICONS.lock} />
@@ -645,23 +733,53 @@ const Dashboard = ({
                     <span className="dash-item__count">{countIn(null)}</span>
                   </button>
                 </li>
-                {collections.map(({ folder, depth }) => (
+                {collections.map(({ folder, depth, hasChildren }) => (
                   <li
                     key={folder.id}
-                    className="dash-collection"
-                    style={{ paddingLeft: `${depth * 0.9}rem` }}
+                    className={clsx("dash-collection", {
+                      "is-dragging": draggingFolder?.id === folder.id,
+                    })}
+                    style={{ paddingLeft: `${Math.min(depth, 6) * 0.9}rem` }}
+                    draggable
+                    onDragStart={(event) => {
+                      event.dataTransfer.setData(
+                        DRAG_TYPE,
+                        `folder:${folder.id}`,
+                      );
+                      event.dataTransfer.effectAllowed = "move";
+                      setDraggingFolder(folder);
+                    }}
+                    onDragEnd={() => {
+                      setDraggingFolder(null);
+                      setDropKey(null);
+                    }}
                   >
+                    {hasChildren && (
+                      <button
+                        className="dash-collection__toggle"
+                        aria-label={`${
+                          collapsed.has(folder.id) ? "Expand" : "Collapse"
+                        } ${folder.name}`}
+                        aria-expanded={!collapsed.has(folder.id)}
+                        onClick={() => toggleCollapsed(folder.id)}
+                      >
+                        <Icon
+                          d={
+                            collapsed.has(folder.id)
+                              ? ICONS.chevronRight
+                              : ICONS.chevron
+                          }
+                          size={14}
+                        />
+                      </button>
+                    )}
                     <button
                       className={clsx("dash-item", {
                         active:
                           view.kind === "scenes" && folderId === folder.id,
                         "is-drop": dropKey === `folder:${folder.id}`,
                       })}
-                      onClick={() => {
-                        setView({ kind: "scenes" });
-                        setFolderId(folder.id);
-                        setQuery("");
-                      }}
+                      onClick={() => openCollection(folder.id)}
                       {...dropTarget(`folder:${folder.id}`, {
                         teamId,
                         folderId: folder.id,
@@ -674,7 +792,9 @@ const Dashboard = ({
                       </span>
                     </button>
                     <CollectionMenu
+                      onNew={() => createCollection(folder)}
                       onRename={() => renameCollection(folder)}
+                      onMove={() => setMovingFolder(folder)}
                       onDelete={() => deleteCollection(folder)}
                     />
                   </li>
@@ -694,6 +814,19 @@ const Dashboard = ({
       <main className="dash-main">
         <header className="dash-main__header">
           <div className="dash-main__heading">
+            {view.kind === "scenes" && !searching && breadcrumb.length > 0 && (
+              <nav className="dash-crumbs" aria-label="Collection path">
+                <button onClick={() => openCollection(null)}>{rootName}</button>
+                {breadcrumb.slice(0, -1).map((folder) => (
+                  <span key={folder.id}>
+                    <span aria-hidden="true"> / </span>
+                    <button onClick={() => openCollection(folder.id)}>
+                      {folder.name}
+                    </button>
+                  </span>
+                ))}
+              </nav>
+            )}
             <h1>
               <Icon
                 d={
@@ -782,6 +915,18 @@ const Dashboard = ({
                   <span>Create scene</span>
                   <Icon d={ICONS.plus} />
                 </button>
+                <button
+                  className="dash-action"
+                  onClick={() => createCollection(currentFolder ?? null)}
+                >
+                  <span className="dash-action__icon">
+                    <Icon d={ICONS.folderPlus} size={22} />
+                  </span>
+                  <span>
+                    {currentFolder ? "New sub-collection" : "New collection"}
+                  </span>
+                  <Icon d={ICONS.plus} />
+                </button>
                 <input
                   ref={importRef}
                   type="file"
@@ -791,6 +936,37 @@ const Dashboard = ({
                   onChange={(event) => importFiles(event.target.files)}
                 />
               </div>
+            )}
+
+            {loaded && !searching && subFolders.length > 0 && (
+              <>
+                <h2 className="dash-subheading">
+                  {currentFolder ? "Sub-collections" : "Collections"}
+                </h2>
+                <ul className="dash-folders">
+                  {subFolders.map((folder) => (
+                    <li key={folder.id}>
+                      <button
+                        className={clsx("dash-folder", {
+                          "is-drop": dropKey === `tile:${folder.id}`,
+                        })}
+                        onClick={() => openCollection(folder.id)}
+                        {...dropTarget(`tile:${folder.id}`, {
+                          teamId,
+                          folderId: folder.id,
+                        })}
+                      >
+                        <Icon d={ICONS.folder} size={20} />
+                        <span>{folder.name}</span>
+                        <span className="dash-item__count">
+                          {countIn(folder.id)}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                <h2 className="dash-subheading">Scenes</h2>
+              </>
             )}
 
             {!loaded ? (
@@ -864,6 +1040,20 @@ const Dashboard = ({
           }}
           pending={pending}
           error={error}
+        />
+      )}
+
+      {movingFolder && (
+        <MoveCollectionModal
+          folder={movingFolder}
+          folders={folders}
+          rootName={rootName}
+          onClose={() => setMovingFolder(null)}
+          onMove={(parentId) => {
+            const folder = movingFolder;
+            setMovingFolder(null);
+            moveCollection(folder, parentId);
+          }}
         />
       )}
 
@@ -960,17 +1150,23 @@ const Menu = ({
 };
 
 const CollectionMenu = ({
+  onNew,
   onRename,
+  onMove,
   onDelete,
 }: {
+  onNew: () => void;
   onRename: () => void;
+  onMove: () => void;
   onDelete: () => void;
 }) => (
   <Menu
     label="Collection options"
     className="dash-collection__menu"
     items={[
+      { label: "New sub-collection", onSelect: onNew },
       { label: "Rename", onSelect: onRename },
+      { label: "Move to…", onSelect: onMove },
       { label: "Delete", onSelect: onDelete, danger: true },
     ]}
   />
@@ -1006,6 +1202,7 @@ const SceneCard = ({
   onDelete: () => void;
 }) => {
   const [editing, setEditing] = useState(false);
+  const [thumbnailFailed, setThumbnailFailed] = useState(false);
   const [draft, setDraft] = useState(scene.name);
 
   const startEditing = () => {
@@ -1035,9 +1232,20 @@ const SceneCard = ({
       onDragEnd={onDragEnd}
     >
       <button className="dash-card__preview" onClick={onOpen}>
-        <span className="dash-card__initial" aria-hidden="true">
-          {scene.name.trim()[0]?.toUpperCase() || "?"}
-        </span>
+        {scene.thumbnailAt && !thumbnailFailed ? (
+          <img
+            className="dash-card__thumb"
+            src={sceneThumbnailURL(scene.id, scene.thumbnailAt)}
+            alt=""
+            loading="lazy"
+            draggable={false}
+            onError={() => setThumbnailFailed(true)}
+          />
+        ) : (
+          <span className="dash-card__initial" aria-hidden="true">
+            {scene.name.trim()[0]?.toUpperCase() || "?"}
+          </span>
+        )}
         <span className="dash-card__time">{timeAgo(scene.updatedAt)}</span>
       </button>
       {editable && !editing && (
@@ -1106,6 +1314,51 @@ const SceneCard = ({
   );
 };
 
+const MoveCollectionModal = ({
+  folder,
+  folders,
+  rootName,
+  onClose,
+  onMove,
+}: {
+  folder: Folder;
+  folders: Folder[];
+  rootName: string;
+  onClose: () => void;
+  onMove: (parentId: string | null) => void;
+}) => {
+  const [parentId, setParentId] = useState(folder.parentId ?? "");
+  // not into itself, nor anywhere inside itself
+  const blocked = folderDescendants(folders, folder.id);
+  blocked.add(folder.id);
+  return (
+    <FormModal
+      title={`Move “${folder.name}”`}
+      submitLabel="Move"
+      onClose={onClose}
+      onSubmit={() => onMove(parentId || null)}
+    >
+      <label className="dash-field">
+        <span className="dash-field__label">Inside</span>
+        <select
+          className="dash-input"
+          value={parentId}
+          onChange={(event) => setParentId(event.target.value)}
+        >
+          <option value="">{rootName} (top level)</option>
+          {folderTree(folders)
+            .filter(({ folder: f }) => !blocked.has(f.id))
+            .map(({ folder: f, path }) => (
+              <option key={f.id} value={f.id}>
+                {path}
+              </option>
+            ))}
+        </select>
+      </label>
+    </FormModal>
+  );
+};
+
 const CreateSceneModal = ({
   folders,
   initialFolderId,
@@ -1152,14 +1405,11 @@ const CreateSceneModal = ({
           onChange={(event) => setFolderId(event.target.value)}
         >
           <option value="">{rootName}</option>
-          {folders
-            .slice()
-            .sort((a, b) => a.name.localeCompare(b.name))
-            .map((folder) => (
-              <option key={folder.id} value={folder.id}>
-                {folder.name}
-              </option>
-            ))}
+          {folderTree(folders).map(({ folder, path }) => (
+            <option key={folder.id} value={folder.id}>
+              {path}
+            </option>
+          ))}
         </select>
       </label>
     </FormModal>
@@ -1224,14 +1474,11 @@ const MoveSceneModal = ({
           onChange={(event) => setFolderId(event.target.value)}
         >
           <option value="">{teamId ? "General" : "Private"}</option>
-          {folders
-            .slice()
-            .sort((a, b) => a.name.localeCompare(b.name))
-            .map((folder) => (
-              <option key={folder.id} value={folder.id}>
-                {folder.name}
-              </option>
-            ))}
+          {folderTree(folders).map(({ folder, path }) => (
+            <option key={folder.id} value={folder.id}>
+              {path}
+            </option>
+          ))}
         </select>
       </label>
     </FormModal>

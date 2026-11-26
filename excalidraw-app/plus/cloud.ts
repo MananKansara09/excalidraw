@@ -31,6 +31,7 @@ import { appJotaiStore } from "../app-jotai";
 import { LocalData } from "../data/LocalData";
 
 import { plusAPI, PlusAPIError, setActiveShareToken } from "./api";
+import { uploadThumbnail } from "./thumbnail";
 import {
   cloudCollaboratorsAtom,
   cloudFollowedActivityAtom,
@@ -102,6 +103,8 @@ const POINTER_INTERVAL_MS = 40;
  */
 const SYNC_INTERVAL_MS = 50;
 /** Backoff between WebSocket reconnect attempts. */
+/** How long after the last save the dashboard preview is re-rendered. */
+const THUMBNAIL_DELAY_MS = 8000;
 const RECONNECT_BASE_MS = 500;
 const RECONNECT_MAX_MS = 8000;
 /** Ping the server this often; no reply for this long means the link is dead. */
@@ -135,6 +138,8 @@ const toBinaryFiles = (files: Record<string, PlusFile> | undefined) =>
  */
 class CloudSession {
   private api: ExcalidrawImperativeAPI | null = null;
+  /** Re-renders the dashboard preview shortly after the last save. */
+  private thumbnailTimer: number | undefined;
   private scene: CloudScene | null = null;
   /** SSE stream: only used when WebSockets can't connect. */
   private events: EventSource | null = null;
@@ -248,6 +253,13 @@ class CloudSession {
     this.unsubScroll = api.onScrollChange(() => this.relayViewport());
     this.openEvents();
     this.loadComments();
+    if (
+      this.canEdit() &&
+      !scene.thumbnailAt &&
+      scene.elements.some((element: ExcalidrawElement) => !element.isDeleted)
+    ) {
+      this.scheduleThumbnail();
+    }
   }
 
   /** Data for the editor's initial render. */
@@ -268,9 +280,28 @@ class CloudSession {
     };
   }
 
+  /** Renders a preview for the dashboard once edits have settled. */
+  private scheduleThumbnail() {
+    const { api, scene } = this;
+    if (!api || !scene || !this.canEdit()) {
+      return;
+    }
+    window.clearTimeout(this.thumbnailTimer);
+    this.thumbnailTimer = window.setTimeout(() => {
+      this.thumbnailTimer = undefined;
+      uploadThumbnail(api, scene.id);
+    }, THUMBNAIL_DELAY_MS);
+  }
+
   stop({ resumeLocalSave = true } = {}) {
     if (this.scene && this.canEdit()) {
       this.flush.flush();
+      if (this.thumbnailTimer !== undefined && this.api) {
+        // leaving before the timer fired: render the preview now
+        window.clearTimeout(this.thumbnailTimer);
+        this.thumbnailTimer = undefined;
+        uploadThumbnail(this.api, this.scene.id);
+      }
     }
     this.closeTransport();
     this.scene = null;
@@ -446,6 +477,9 @@ class CloudSession {
       }
       if (this.scene === scene) {
         appJotaiStore.set(cloudStatusAtom, { state: "saved", at: Date.now() });
+        if (changed.length) {
+          this.scheduleThumbnail();
+        }
       }
     } catch (error: any) {
       appJotaiStore.set(

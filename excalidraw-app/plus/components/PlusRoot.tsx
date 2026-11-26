@@ -28,6 +28,8 @@ import { goToSignIn } from "../auth";
 
 import { openCloudScene, saveCanvasToCloud } from "../scenes";
 
+import { folderTree } from "../folders";
+
 import { AccountDialog } from "./AccountDialog";
 import { CloudShareDialog } from "./CloudShareDialog";
 import { CommentPins } from "./Comments";
@@ -36,7 +38,7 @@ import { HangoutMedia } from "./HangoutControls";
 import { PresentationMode } from "./Presentation";
 import { ErrorText, Field, useAsyncAction } from "./ui";
 
-import type { TeamSummary } from "../api";
+import type { Folder, TeamSummary } from "../api";
 
 /** Checks for a signed-in session once on startup. */
 export const usePlusSession = () => {
@@ -64,19 +66,36 @@ const SaveToCloudDialog = ({ api }: { api: ExcalidrawImperativeAPI }) => {
   const setDialog = useSetAtom(plusDialogAtom);
   const [name, setName] = useState(api.getName() || "Untitled");
   const [teamId, setTeamId] = useState("");
+  const [folderId, setFolderId] = useState("");
   const [teams, setTeams] = useState<TeamSummary[]>([]);
+  const [folders, setFolders] = useState<Folder[]>([]);
   const { pending, error, run } = useAsyncAction();
 
   useEffect(() => {
     run(async () => setTeams((await plusAPI.listTeams()).teams));
   }, [run]);
 
+  // the collections of the chosen workspace
+  useEffect(() => {
+    let cancelled = false;
+    setFolders([]);
+    run(async () => {
+      const { folders } = await plusAPI.listFolders(teamId || null);
+      if (!cancelled) {
+        setFolders(folders);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [teamId, run]);
+
   const save = async () => {
     const scene = await run(() =>
       saveCanvasToCloud(api, {
         name: name.trim() || "Untitled",
         teamId: teamId || null,
-        folderId: null,
+        folderId: folderId || null,
       }),
     );
     if (scene) {
@@ -115,10 +134,28 @@ const SaveToCloudDialog = ({ api }: { api: ExcalidrawImperativeAPI }) => {
             label="Workspace"
             value={teamId}
             options={[
-              { value: "", label: "My scenes" },
+              { value: "", label: "Private" },
               ...teams.map((team) => ({ value: team.id, label: team.name })),
             ]}
-            onChange={setTeamId}
+            onChange={(nextTeamId) => {
+              setTeamId(nextTeamId);
+              setFolderId("");
+            }}
+          />
+        </Field>
+        <Field label="Collection">
+          <Select
+            className="plus-select"
+            label="Collection"
+            value={folderId}
+            options={[
+              { value: "", label: teamId ? "General" : "Private" },
+              ...folderTree(folders).map(({ folder, path }) => ({
+                value: folder.id,
+                label: path,
+              })),
+            ]}
+            onChange={setFolderId}
           />
         </Field>
         <ErrorText error={error} />

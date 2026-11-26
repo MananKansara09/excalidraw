@@ -173,6 +173,9 @@ export const openDatabase = (path: string): DB => {
   ensureColumn(db, "comments", "mentions", "TEXT NOT NULL DEFAULT '[]'");
   ensureColumn(db, "users", "mentions_seen_at", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn(db, "users", "avatar_url", "TEXT");
+  // a small preview image (data URL) the editor renders when it saves
+  ensureColumn(db, "scenes", "thumbnail", "TEXT");
+  ensureColumn(db, "scenes", "thumbnail_at", "INTEGER");
   return db;
 };
 

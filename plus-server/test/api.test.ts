@@ -189,6 +189,64 @@ describe("scenes and folders", () => {
   });
 });
 
+describe("thumbnails", () => {
+  // 1x1 transparent png
+  const PNG =
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+
+  test("are stored by editors, served as an image, copied on duplicate", async () => {
+    const { api } = await signUp(server.base, "thumbs");
+    const { api: stranger } = await signUp(server.base, "thumbs-stranger");
+    const scene = (await api.post("/api/v1/scenes", { name: "Pic" })).json
+      .scene;
+    assert.equal(scene.thumbnailAt, null);
+    assert.equal(
+      (await api.get(`/api/v1/scenes/${scene.id}/thumbnail`)).status,
+      404,
+    );
+
+    const saved = await api.put(`/api/v1/scenes/${scene.id}/thumbnail`, {
+      image: PNG,
+    });
+    assert.equal(saved.status, 200);
+    const listed = (await api.get("/api/v1/scenes")).json.scenes.find(
+      (s: any) => s.id === scene.id,
+    );
+    assert.equal(typeof listed.thumbnailAt, "number");
+    // a preview is not an edit
+    assert.equal(listed.version, scene.version);
+    assert.equal(listed.updatedAt, scene.updatedAt);
+
+    const image = await api.get(`/api/v1/scenes/${scene.id}/thumbnail`);
+    assert.equal(image.status, 200);
+    assert.equal(image.headers.get("content-type"), "image/png");
+    assert.equal(
+      (await stranger.get(`/api/v1/scenes/${scene.id}/thumbnail`)).status,
+      404,
+    );
+
+    const copy = (await api.post(`/api/v1/scenes/${scene.id}/duplicate`)).json
+      .scene;
+    assert.equal(typeof copy.thumbnailAt, "number");
+
+    assert.equal(
+      (
+        await stranger.put(`/api/v1/scenes/${scene.id}/thumbnail`, {
+          image: PNG,
+        })
+      ).status,
+      404,
+    );
+    for (const bad of ["nope", "data:text/html;base64,PGI+", 42]) {
+      assert.equal(
+        (await api.put(`/api/v1/scenes/${scene.id}/thumbnail`, { image: bad }))
+          .status,
+        400,
+      );
+    }
+  });
+});
+
 describe("access management and sharing", () => {
   test("strangers can't see a scene; invited viewers can't edit", async () => {
     const { api: owner } = await signUp(server.base, "owner1");

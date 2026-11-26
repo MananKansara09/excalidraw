@@ -289,6 +289,36 @@
 
 .dash-collection {
   position: relative;
+  display: flex;
+  align-items: center;
+
+  &.is-dragging {
+    opacity: 0.45;
+  }
+
+  .dash-item {
+    flex: 1;
+    min-width: 0;
+  }
+
+  &__toggle {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 1.25rem;
+    height: 1.75rem;
+    margin-right: -0.2rem;
+    padding: 0;
+    border: none;
+    border-radius: 4px;
+    background: none;
+    color: var(--dash-muted);
+    cursor: pointer;
+
+    &:hover {
+      background: var(--dash-hover);
+    }
+  }
 
   .dash-menu.dash-collection__menu {
     position: absolute;
@@ -429,6 +459,18 @@
 
 .dash-card {
   position: relative;
+
+  &__thumb {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    border-radius: 11px;
+    // previews are rendered on the scene's own background, in light mode
+    background: #fff;
+  }
+
   min-width: 0;
 
   &__quick {
@@ -808,5 +850,78 @@
   .dash-modal,
   .dash-modal__overlay {
     animation: none !important;
+  }
+}
+
+// nested collections ----------------------------------------------------------
+
+.dash-crumbs {
+  margin-bottom: 0.35rem;
+  font-size: 0.85rem;
+  color: var(--dash-muted);
+
+  button {
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--dash-primary);
+    cursor: pointer;
+
+    &:hover {
+      text-decoration: underline;
+    }
+  }
+}
+
+.dash-subheading {
+  margin: 0 0 0.75rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--dash-muted);
+}
+
+.dash-folders {
+  list-style: none;
+  margin: 0 0 1.75rem;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr));
+  gap: 0.75rem;
+}
+
+.dash-folder {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--dash-border);
+  border-radius: 10px;
+  background: var(--dash-panel);
+  text-align: left;
+  cursor: pointer;
+
+  > span:nth-child(2) {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  > svg {
+    flex: none;
+    color: var(--dash-primary);
+  }
+
+  &:hover {
+    border-color: var(--dash-primary);
+  }
+
+  &.is-drop {
+    background: var(--dash-primary-soft);
+    border-color: var(--dash-primary);
   }
 }
