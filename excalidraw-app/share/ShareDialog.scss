@@ -221,11 +221,7 @@
       }
 
       &__role {
-        border-radius: var(--border-radius-md);
-        border: 1px solid var(--default-border-color);
-        background-color: var(--island-bg-color);
-        color: var(--text-primary-color);
-        padding: 0 0.5rem;
+        padding: 0 0.75rem;
         font-size: 0.75rem;
         font-weight: 600;
       }

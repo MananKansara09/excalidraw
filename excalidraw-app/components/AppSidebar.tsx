@@ -37,7 +37,10 @@ export const AppSidebar = () => {
       <Sidebar.Tab tab="comments" className="px-3 app-sidebar-comments-tab">
         {excalidrawAPI && <CommentsPanel api={excalidrawAPI} />}
       </Sidebar.Tab>
-      <Sidebar.Tab tab="presentation" className="px-3">
+      <Sidebar.Tab
+        tab="presentation"
+        className="px-3 app-sidebar-presentation-tab"
+      >
         {excalidrawAPI && <PresentationPanel api={excalidrawAPI} />}
       </Sidebar.Tab>
     </DefaultSidebar>

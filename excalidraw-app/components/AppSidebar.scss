@@ -90,12 +90,13 @@
     }
   }
 
-  // let long comment lists scroll inside the sidebar instead of being clipped
+  // let long comment and slide lists scroll inside the sidebar instead of being clipped
   .sidebar-tabs-root {
     min-height: 0;
   }
 
-  .app-sidebar-comments-tab {
+  .app-sidebar-comments-tab,
+  .app-sidebar-presentation-tab {
     min-height: 0;
     overflow-y: auto;
     overflow-x: hidden;

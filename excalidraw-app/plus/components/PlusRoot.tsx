@@ -1,5 +1,6 @@
 import { Dialog } from "@excalidraw/excalidraw/components/Dialog";
 import { FilledButton } from "@excalidraw/excalidraw/components/FilledButton";
+import { Select } from "@excalidraw/excalidraw/components/Select";
 import { useEffect, useRef, useState } from "react";
 
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
@@ -109,18 +110,16 @@ const SaveToCloudDialog = ({ api }: { api: ExcalidrawImperativeAPI }) => {
           />
         </Field>
         <Field label="Workspace">
-          <select
+          <Select
             className="plus-select"
+            label="Workspace"
             value={teamId}
-            onChange={(event) => setTeamId(event.target.value)}
-          >
-            <option value="">My scenes</option>
-            {teams.map((team) => (
-              <option key={team.id} value={team.id}>
-                {team.name}
-              </option>
-            ))}
-          </select>
+            options={[
+              { value: "", label: "My scenes" },
+              ...teams.map((team) => ({ value: team.id, label: team.name })),
+            ]}
+            onChange={setTeamId}
+          />
         </Field>
         <ErrorText error={error} />
         <FilledButton

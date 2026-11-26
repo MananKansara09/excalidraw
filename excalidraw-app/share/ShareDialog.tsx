@@ -2,6 +2,7 @@ import { trackEvent } from "@excalidraw/excalidraw/analytics";
 import { copyTextToSystemClipboard } from "@excalidraw/excalidraw/clipboard";
 import { Dialog } from "@excalidraw/excalidraw/components/Dialog";
 import { FilledButton } from "@excalidraw/excalidraw/components/FilledButton";
+import { Select } from "@excalidraw/excalidraw/components/Select";
 import { TextField } from "@excalidraw/excalidraw/components/TextField";
 import {
   copyIcon,
@@ -157,15 +158,17 @@ const SharePeopleSection = ({
             }
           }}
         />
-        <select
+        <Select
           className="ShareDialog__people__role"
-          aria-label="Share role"
+          label="Share role"
           value={role}
-          onChange={(e) => setRole(e.target.value as ShareRole)}
-        >
-          <option value="editor">Editor</option>
-          <option value="viewer">Viewer</option>
-        </select>
+          options={[
+            { value: "editor", label: "Editor" },
+            { value: "viewer", label: "Viewer" },
+          ]}
+          onChange={setRole}
+          align="end"
+        />
         <FilledButton
           size="medium"
           label={isInviting ? "Sending..." : "Add"}

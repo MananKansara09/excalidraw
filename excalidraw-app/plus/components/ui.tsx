@@ -1,3 +1,4 @@
+import { Select } from "@excalidraw/excalidraw/components/Select";
 import clsx from "clsx";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -67,19 +68,15 @@ export const RoleSelect = <T extends string>({
   disabled?: boolean;
   label: string;
 }) => (
-  <select
+  <Select
     className="plus-select"
-    aria-label={label}
+    label={label}
     value={value}
+    options={options}
     disabled={disabled}
-    onChange={(event) => onChange(event.target.value as T)}
-  >
-    {options.map((option) => (
-      <option key={option.value} value={option.value}>
-        {option.label}
-      </option>
-    ))}
-  </select>
+    onChange={onChange}
+    align="end"
+  />
 );
 
 /** Runs an async action, tracking pending state and the error message. */
