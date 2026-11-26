@@ -1,6 +1,6 @@
 # Deploying Excalidraw with the Plus server
 
-This deploys the app together with `plus-server/` (cloud scenes, sharing, teams, comments, presentations, voice, AI, REST API and MCP). One container serves the app and the API on `127.0.0.1:3015`; the Caddy already running on your server proxies your domain to it and handles HTTPS.
+This deploys the app together with `plus-server/` (cloud scenes, sharing, teams, comments, presentations, voice, AI, REST API and MCP). One container serves the app and the API on `127.0.0.1:3015`, and a second one (`room`, [excalidraw-room](https://github.com/excalidraw/excalidraw-room)) relays live collaboration on `127.0.0.1:3002`; the Caddy already running on your server proxies your domain to it and handles HTTPS.
 
 HTTPS is required, not optional: browsers allow the microphone and screen sharing only on secure origins, and the session cookie is marked `Secure`.
 
@@ -50,7 +50,7 @@ HTTPS is required, not optional: browsers allow the microphone and screen sharin
    curl http://127.0.0.1:3015/api/health
    ```
 
-4. Point Caddy at it. Add the site block from `Caddyfile.plus` to your Caddyfile (usually `/etc/caddy/Caddyfile`), replacing `draw.example.com` with your domain (and the port, if you changed `PLUS_PORT`). Keep the `flush_interval -1` line and the `encode` match list: they stop Caddy from buffering or compressing the event streams that live sync and voice use. Then check and reload:
+4. Point Caddy at it. Add the site block from `Caddyfile.plus` to your Caddyfile (usually `/etc/caddy/Caddyfile`), replacing `draw.example.com` with your domain (and the ports, if you changed `PLUS_PORT` or `ROOM_PORT`). The `/socket.io/*` block is what live collaboration connects through. Keep the `flush_interval -1` line and the `encode` match list: they stop Caddy from buffering or compressing the event streams that live sync and voice use. Then check and reload:
 
    ```bash
    caddy validate --config /etc/caddy/Caddyfile
@@ -205,6 +205,7 @@ Run a single instance: realtime state (presence, voice signaling) lives in the s
 | Symptom | Cause and fix |
 | --- | --- |
 | Caddy logs certificate errors | DNS doesn't point at the server yet, or port 80 is blocked. Fix it and run `sudo systemctl reload caddy`. |
+| Live collaboration doesn't connect | The `room` container isn't running, Caddy lacks the `/socket.io/*` block, or the app was built for another domain (rebuild after changing `DOMAIN`). |
 | `502 Bad Gateway` from Caddy | The container isn't running or uses another port: check `docker compose ... ps` and that the `reverse_proxy` port matches `PLUS_PORT`. |
 | Top bar shows **Offline**, edits don't appear in other windows | Event streams are being buffered: the Caddy site block lacks `flush_interval -1` or compresses `text/event-stream`, or another proxy (e.g. Cloudflare) buffers them. The smoke test's event stream check confirms the fix. |
 | Signed in, but reloading signs you out | The site isn't on HTTPS while `PLUS_SECURE_COOKIES=true`. Use the HTTPS URL. |
