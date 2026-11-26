@@ -10,6 +10,9 @@ COPY . .
 RUN --mount=type=cache,target=/usr/local/share/.cache/yarn \
     yarn --frozen-lockfile --network-timeout 600000
 
+# when passed, overrides the value in .env.production
+ARG VITE_APP_WS_SERVER_URL
+
 RUN yarn build:app:docker
 
 

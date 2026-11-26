@@ -5,8 +5,10 @@ import React, { useLayoutEffect } from "react";
 import { isShallowEqual } from "@excalidraw/common";
 
 import { t } from "../i18n";
+import { actionGoToCollaborator } from "../actions/actionNavigate";
 
 import { useExcalidrawActionManager } from "./App";
+import { CollaboratorProfilePopover } from "./CollaboratorProfilePopover";
 import { chevronDownIcon } from "./icons";
 import { Island } from "./Island";
 import { QuickSearch } from "./QuickSearch";
@@ -23,6 +25,7 @@ export type GoToCollaboratorComponentProps = {
   collaborator: Collaborator;
   withName: boolean;
   isBeingFollowed: boolean;
+  openProfileOnClick?: boolean;
 };
 
 const DEFAULT_MAX_AVATARS = 4;
@@ -58,6 +61,7 @@ const renderCollaborator = ({
   withName = false,
   shouldWrapWithTooltip = false,
   isBeingFollowed,
+  openProfileOnClick = false,
 }: {
   actionManager: ActionManager;
   collaborator: Collaborator;
@@ -65,24 +69,48 @@ const renderCollaborator = ({
   withName?: boolean;
   shouldWrapWithTooltip?: boolean;
   isBeingFollowed: boolean;
+  openProfileOnClick?: boolean;
 }) => {
   const data: GoToCollaboratorComponentProps = {
     socketId,
     collaborator,
     withName,
     isBeingFollowed,
+    openProfileOnClick,
   };
   const avatarJSX = actionManager.renderAction("goToCollaborator", data);
 
-  return (
+  const wrappedJSX = (
     <ConditionalTooltipWrapper
-      key={socketId}
+      key={openProfileOnClick ? undefined : socketId}
       username={collaborator.username}
       shouldWrap={shouldWrapWithTooltip}
     >
       {avatarJSX}
     </ConditionalTooltipWrapper>
   );
+
+  if (openProfileOnClick) {
+    return (
+      <CollaboratorProfilePopover
+        key={socketId}
+        collaborator={collaborator}
+        socketId={socketId}
+        isBeingFollowed={isBeingFollowed}
+        onToggleFollow={() =>
+          actionManager.executeAction(
+            actionGoToCollaborator,
+            "ui",
+            collaborator,
+          )
+        }
+      >
+        {wrappedJSX}
+      </CollaboratorProfilePopover>
+    );
+  }
+
+  return wrappedJSX;
 };
 
 type UserListUserObject = Pick<
@@ -91,6 +119,8 @@ type UserListUserObject = Pick<
   | "id"
   | "socketId"
   | "username"
+  | "userState"
+  | "activity"
   | "isInCall"
   | "isSpeaking"
   | "isMuted"
@@ -112,6 +142,8 @@ const collaboratorComparatorKeys = [
   "id",
   "socketId",
   "username",
+  "userState",
+  "activity",
   "isInCall",
   "isSpeaking",
   "isMuted",
@@ -212,6 +244,7 @@ export const UserList = React.memo(
         socketId: collaborator.socketId,
         shouldWrapWithTooltip: true,
         isBeingFollowed: collaborator.socketId === userToFollow,
+        openProfileOnClick: !collaborator.isCurrentUser,
       });
 
       if (!collaborator.isCurrentUser) {
@@ -301,6 +334,7 @@ export const UserList = React.memo(
               socketId: collaborator.socketId,
               shouldWrapWithTooltip: true,
               isBeingFollowed: collaborator.socketId === userToFollow,
+              openProfileOnClick: !collaborator.isCurrentUser,
             }),
           )}
         </div>

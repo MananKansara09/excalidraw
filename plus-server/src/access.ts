@@ -33,6 +33,8 @@ export type SceneRow = {
   version: number;
   created_at: number;
   updated_at: number;
+  thumbnail?: string | null;
+  thumbnail_at?: number | null;
 };
 
 export const getTeamRole = (
@@ -69,45 +71,75 @@ export const getShareToken = (req: Request) =>
   req.query.get("share") ||
   null;
 
+/** What the signed-in user's own account gives them on a scene. */
+const resolveUserRole = (
+  db: DB,
+  scene: SceneRow,
+  user: User | null,
+): SceneRole | null => {
+  if (!user) {
+    return null;
+  }
+  if (scene.owner_id === user.id) {
+    return "owner";
+  }
+  let userRole: SceneRole | null = null;
+  if (scene.team_id) {
+    const teamRole = getTeamRole(db, scene.team_id, user.id);
+    if (teamRole === "owner" || teamRole === "admin") {
+      userRole = "owner";
+    } else if (teamRole === "member") {
+      userRole = "editor";
+    }
+  }
+  const direct = get<{ role: SceneRole }>(
+    db,
+    "SELECT role FROM scene_access WHERE scene_id = ? AND user_id = ?",
+    scene.id,
+    user.id,
+  );
+  return maxRole(userRole, direct?.role);
+};
+
+const getLink = (db: DB, scene: SceneRow, shareToken: string | null) =>
+  shareToken
+    ? get<{ role: SceneRole; kind: "full" | "presentation" }>(
+        db,
+        "SELECT role, kind FROM share_links WHERE token = ? AND scene_id = ?",
+        shareToken,
+        scene.id,
+      ) ?? null
+    : null;
+
+export type SceneAccess = {
+  role: SceneRole | null;
+  /**
+   * The caller got in through a presentation link and has no other access:
+   * they may see the slides, nothing else.
+   */
+  slidesOnly: boolean;
+};
+
+export const resolveSceneAccess = (
+  db: DB,
+  scene: SceneRow,
+  user: User | null,
+  shareToken: string | null,
+): SceneAccess => {
+  const userRole = resolveUserRole(db, scene, user);
+  const link = getLink(db, scene, shareToken);
+  return {
+    role: maxRole(userRole, link?.role),
+    slidesOnly: !userRole && link?.kind === "presentation",
+  };
+};
+
 export const resolveSceneRole = (
   db: DB,
   scene: SceneRow,
   user: User | null,
   shareToken: string | null,
-): SceneRole | null => {
-  let userRole: SceneRole | null = null;
-  if (user) {
-    if (scene.owner_id === user.id) {
-      return "owner";
-    }
-    if (scene.team_id) {
-      const teamRole = getTeamRole(db, scene.team_id, user.id);
-      if (teamRole === "owner" || teamRole === "admin") {
-        userRole = "owner";
-      } else if (teamRole === "member") {
-        userRole = "editor";
-      }
-    }
-    const direct = get<{ role: SceneRole }>(
-      db,
-      "SELECT role FROM scene_access WHERE scene_id = ? AND user_id = ?",
-      scene.id,
-      user.id,
-    );
-    userRole = maxRole(userRole, direct?.role);
-  }
-  let linkRole: SceneRole | null = null;
-  if (shareToken) {
-    linkRole =
-      get<{ role: SceneRole }>(
-        db,
-        "SELECT role FROM share_links WHERE token = ? AND scene_id = ?",
-        shareToken,
-        scene.id,
-      )?.role ?? null;
-  }
-  return maxRole(userRole, linkRole);
-};
+): SceneRole | null => resolveSceneAccess(db, scene, user, shareToken).role;
 
 /**
  * Loads a scene and checks the caller has at least `required` on it.
@@ -120,12 +152,22 @@ export const loadSceneForRole = (
   user: User | null,
   sceneId: string,
   required: SceneRole,
+  /**
+   * Presentation links only open the slides, so every route refuses them
+   * unless it opts in here and filters what it returns.
+   */
+  { allowSlidesOnly = false } = {},
 ) => {
   const scene = get<SceneRow>(db, "SELECT * FROM scenes WHERE id = ?", sceneId);
   if (!scene) {
     throw notFound("Scene not found");
   }
-  const role = resolveSceneRole(db, scene, user, getShareToken(req));
+  const { role, slidesOnly } = resolveSceneAccess(
+    db,
+    scene,
+    user,
+    getShareToken(req),
+  );
   if (!role) {
     if (!user) {
       throw unauthorized();
@@ -139,10 +181,18 @@ export const loadSceneForRole = (
         : "You have view-only access to this scene",
     );
   }
-  return { scene, role };
+  if (slidesOnly && !allowSlidesOnly) {
+    throw forbidden("This link only shows the presentation");
+  }
+  return { scene, role, slidesOnly };
 };
 
-export type Person = { userId: string; name: string; email: string };
+export type Person = {
+  userId: string;
+  name: string;
+  email: string;
+  avatarUrl: string | null;
+};
 
 /**
  * Everyone with an account who can open the scene: its owner, people it's
@@ -150,14 +200,19 @@ export type Person = { userId: string; name: string; email: string };
  * included: links are anonymous.)
  */
 export const getScenePeople = (db: DB, scene: SceneRow): Person[] => {
-  const rows = all<{ id: string; name: string; email: string }>(
+  const rows = all<{
+    id: string;
+    name: string;
+    email: string;
+    avatar_url: string | null;
+  }>(
     db,
-    `SELECT id, name, email FROM users WHERE id = ?
+    `SELECT id, name, email, avatar_url FROM users WHERE id = ?
      UNION
-     SELECT users.id, users.name, users.email FROM scene_access
+     SELECT users.id, users.name, users.email, users.avatar_url FROM scene_access
        JOIN users ON users.id = scene_access.user_id WHERE scene_access.scene_id = ?
      UNION
-     SELECT users.id, users.name, users.email FROM team_members
+     SELECT users.id, users.name, users.email, users.avatar_url FROM team_members
        JOIN users ON users.id = team_members.user_id WHERE team_members.team_id = ?
      ORDER BY name`,
     scene.owner_id,
@@ -168,6 +223,7 @@ export const getScenePeople = (db: DB, scene: SceneRow): Person[] => {
     userId: row.id,
     name: row.name,
     email: row.email,
+    avatarUrl: row.avatar_url ?? null,
   }));
 };
 

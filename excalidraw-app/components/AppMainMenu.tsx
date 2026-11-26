@@ -93,7 +93,6 @@ export const AppMainMenu: React.FC<{
           Back to local canvas
         </MainMenu.Item>
       )}
-      <MainMenu.DefaultItems.Socials />
       {user ? (
         <MainMenu.Item
           icon={loginIcon}

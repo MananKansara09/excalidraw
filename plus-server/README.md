@@ -11,7 +11,7 @@ A self-hosted backend for the Plus features of the Excalidraw app in this reposi
 - **Comments**: threads pinned to elements or canvas spots, replies, resolve, `@`-mentions of anyone with access, with a toast and a mentions inbox
 - **Live pointers**: everyone's named cursor, laser and selection, viewers included
 - **The talk: voice, cameras, screen sharing and chat** (WebRTC, signaled by this server). Only people who join the talk hear, see and chat, including while presenting
-- **Presentations**: per-scene slide order (export to PDF/PPTX runs in the app)
+- **Presentations**: per-scene slide order (export to PDF/PPTX runs in the app), public presentation links that show only the slides, and live presenting that viewers follow
 - **AI**: text-to-diagram and wireframe-to-code, 100 requests a day per user on the server's key, or unlimited with a user's own Anthropic API key
 - **REST API** and **MCP server** authenticated with per-user API keys
 
@@ -65,6 +65,13 @@ curl -H "Authorization: Bearer exk_..." https://your-host/api/v1/scenes?scope=al
 - `GET /scenes/:id/summary` returns a readable digest of a scene
 - `GET|POST /folders`, `GET|POST /teams`, `GET|POST /scenes/:id/comments`
 - `GET|POST /scenes/:id/access`, `POST /scenes/:id/links`
+- `GET /presentations/live` lists presentations running right now in scenes you can open
+
+### Public presentations
+
+`POST /scenes/:id/links` with `{"kind": "presentation"}` creates a link that is always view-only and only serves the scene's slides: the frames and what's drawn inside them (and just the images those use). The rest of the canvas, comments and other people's cursors never reach it, over REST or the event stream (its connection is told to re-fetch instead of being sent edits), and every other scene route answers 403 to it. Signed-in people who already have access to the scene aren't restricted by also opening the link. `GET /share/:token` reports the link's `kind` and whether a presentation is `live`.
+
+Whoever can edit the scene presents by sending the `presentation-start`, `follow-slide` (`{"index": n}`) and `presentation-stop` signals; one presenter per scene, and a presenter who disconnects stops presenting. Everyone connected to the scene sees `presenting` and `slide` in the presence list, so late joiners land on the right slide.
 
 `PUT /scenes/:id` replaces the scene's elements; `POST /scenes/:id/sync` merges them by element version, the way the editor does while collaborating.
 
@@ -88,6 +95,6 @@ The tests start the server on a random port with an in-memory database and a fak
 
 ## Notes and limits
 
-- Live collaboration on cloud scenes goes through this server (Server-Sent Events), unlike the app's end-to-end encrypted live rooms, which use the separate excalidraw-room service. Cloud scenes are stored unencrypted on your server.
+- Live collaboration on cloud scenes goes through this server over a WebSocket (`/api/v1/scenes/:id/ws`; edits are acknowledged, and the app falls back to Server-Sent Events + HTTP if WebSockets are blocked). If you put a reverse proxy in front, it must forward `Upgrade` requests, unlike the app's end-to-end encrypted live rooms, which use the separate excalidraw-room service. Cloud scenes are stored unencrypted on your server.
 - Hangouts are a peer-to-peer mesh: fine for small groups; larger calls need an SFU.
 - The server keeps realtime state in memory, so run a single instance.

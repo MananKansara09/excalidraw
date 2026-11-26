@@ -2,6 +2,7 @@ import { trackEvent } from "@excalidraw/excalidraw/analytics";
 import { copyTextToSystemClipboard } from "@excalidraw/excalidraw/clipboard";
 import { Dialog } from "@excalidraw/excalidraw/components/Dialog";
 import { FilledButton } from "@excalidraw/excalidraw/components/FilledButton";
+import { Select } from "@excalidraw/excalidraw/components/Select";
 import { TextField } from "@excalidraw/excalidraw/components/TextField";
 import {
   copyIcon,
@@ -20,6 +21,15 @@ import { useEffect, useRef, useState } from "react";
 
 import { atom, useAtom, useAtomValue } from "../app-jotai";
 import { activeRoomLinkAtom } from "../collab/Collab";
+import { getCollaborationLinkData } from "../data";
+import {
+  currentUserAtom,
+  knownUsersAtom,
+  notificationEngine,
+  normalizeHandle,
+  sharedUsersByRoomAtom,
+  type ShareRole,
+} from "../notifications";
 
 import "./ShareDialog.scss";
 import { QRCode } from "./QRCode";
@@ -52,6 +62,180 @@ export type ShareDialogProps = {
   handleClose: () => void;
   onExportToBackend: OnExportToBackend;
   type: ShareDialogType;
+};
+
+const SharePeopleSection = ({
+  collabAPI,
+  activeRoomLink,
+}: {
+  collabAPI: CollabAPI;
+  activeRoomLink: string | null;
+}) => {
+  const [inviteInput, setInviteInput] = useState("");
+  const [role, setRole] = useState<ShareRole>("editor");
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [isInviting, setIsInviting] = useState(false);
+  const sectionRef = useRef<HTMLDivElement | null>(null);
+
+  const currentUser = useAtomValue(currentUserAtom);
+  const knownUsers = useAtomValue(knownUsersAtom);
+  const sharedUsersByRoom = useAtomValue(sharedUsersByRoomAtom);
+
+  const roomData = activeRoomLink
+    ? getCollaborationLinkData(activeRoomLink)
+    : null;
+  const currentRoomId = collabAPI.getRoomId() || roomData?.roomId || "local";
+  const sharedUsers = sharedUsersByRoom[currentRoomId] ?? [];
+
+  const suggestedUsers = knownUsers
+    .filter(
+      (u) =>
+        u.handle !== currentUser.handle &&
+        !sharedUsers.some((s) => s.handle === u.handle) &&
+        (!inviteInput.trim() ||
+          u.username.toLowerCase().includes(inviteInput.trim().toLowerCase()) ||
+          u.handle.includes(normalizeHandle(inviteInput))),
+    )
+    .slice(0, 5);
+
+  const handleInvite = async (targetName?: string) => {
+    const rawTarget = (targetName ?? inviteInput).trim();
+    if (!rawTarget || isInviting) {
+      return;
+    }
+
+    setIsInviting(true);
+    setStatusMessage(null);
+    try {
+      let roomLink = activeRoomLink || collabAPI.getActiveRoomLink();
+      if (!roomLink) {
+        await collabAPI.startCollaboration(null);
+        const ownerWin =
+          sectionRef.current?.ownerDocument.defaultView ?? window;
+        roomLink = collabAPI.getActiveRoomLink() || ownerWin.location.href;
+      }
+
+      const parsed = getCollaborationLinkData(roomLink);
+      const roomId = parsed?.roomId || collabAPI.getRoomId() || "local";
+
+      const { entry } = await notificationEngine.addSharedUser({
+        roomId,
+        roomKey: parsed?.roomKey,
+        roomLink,
+        targetUsername: rawTarget,
+        role,
+      });
+
+      setInviteInput("");
+      setStatusMessage(`Real-time invite sent to @${entry.handle}`);
+    } finally {
+      setIsInviting(false);
+    }
+  };
+
+  return (
+    <div className="ShareDialog__people" ref={sectionRef}>
+      <div className="ShareDialog__people__header">
+        <span>Share with people</span>
+        <span className="ShareDialog__people__badge">Real-time notify</span>
+      </div>
+
+      <div className="ShareDialog__people__form">
+        <TextField
+          value={inviteInput}
+          placeholder="Enter username or @handle"
+          fullWidth
+          onChange={(val) => {
+            setInviteInput(val);
+            if (statusMessage) {
+              setStatusMessage(null);
+            }
+          }}
+          onKeyDown={(event) => {
+            if (event.key === KEYS.ENTER) {
+              event.preventDefault();
+              void handleInvite();
+            }
+          }}
+        />
+        <Select
+          className="ShareDialog__people__role"
+          label="Share role"
+          value={role}
+          options={[
+            { value: "editor", label: "Editor" },
+            { value: "viewer", label: "Viewer" },
+          ]}
+          onChange={setRole}
+          align="end"
+        />
+        <FilledButton
+          size="medium"
+          label={isInviting ? "Sending..." : "Add"}
+          disabled={!inviteInput.trim() || isInviting}
+          onClick={() => void handleInvite()}
+        />
+      </div>
+
+      {suggestedUsers.length > 0 && (
+        <div className="ShareDialog__people__suggestions">
+          <span className="ShareDialog__people__suggestionsLabel">
+            Quick add:
+          </span>
+          {suggestedUsers.map((user) => (
+            <button
+              key={user.handle}
+              type="button"
+              className="ShareDialog__people__chip"
+              onClick={() => void handleInvite(user.username)}
+            >
+              +{user.username}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {statusMessage && (
+        <div
+          className="ShareDialog__people__status"
+          role="status"
+          data-testid="share-invite-status"
+        >
+          {statusMessage}
+        </div>
+      )}
+
+      {sharedUsers.length > 0 && (
+        <div className="ShareDialog__people__list">
+          {sharedUsers.map((entry) => (
+            <div key={entry.handle} className="ShareDialog__people__row">
+              <div className="ShareDialog__people__user">
+                <strong>{entry.username}</strong>
+                <span>@{entry.handle}</span>
+              </div>
+              <div className="ShareDialog__people__rowActions">
+                <span className="ShareDialog__people__roleBadge">
+                  {entry.role}
+                </span>
+                <button
+                  type="button"
+                  className="ShareDialog__people__removeBtn"
+                  onClick={() =>
+                    notificationEngine.removeSharedUser(
+                      currentRoomId,
+                      entry.handle,
+                    )
+                  }
+                >
+                  Remove
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 };
 
 const ActiveRoomDialog = ({
@@ -144,6 +328,10 @@ const ActiveRoomDialog = ({
         />
       </div>
       <QRCode value={activeRoomLink} />
+      <SharePeopleSection
+        collabAPI={collabAPI}
+        activeRoomLink={activeRoomLink}
+      />
       <div className="ShareDialog__active__description">
         <p>
           <span
@@ -205,6 +393,8 @@ const ShareDialogPicker = (props: ShareDialogProps) => {
           }}
         />
       </div>
+
+      <SharePeopleSection collabAPI={collabAPI} activeRoomLink={null} />
 
       {props.type === "share" && (
         <div className="ShareDialog__separator">
