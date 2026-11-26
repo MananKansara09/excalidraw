@@ -1,11 +1,23 @@
 import { newId } from "./db.ts";
 
 import type { ServerResponse } from "node:http";
+import type { WebSocketConnection } from "./websocket.ts";
+
+/** How a connection delivers events: an SSE stream or a WebSocket. */
+export type Transport = {
+  send: (event: string, data: unknown) => void;
+  /** Keeps idle proxies from dropping the connection. */
+  heartbeat: () => void;
+  close: () => void;
+  /** Bytes waiting to be flushed to a slow client. */
+  backlog: () => number;
+};
 
 /**
- * One open SSE stream. Each browser tab viewing a cloud scene holds one; it
- * carries scene updates, presence, comment events and the WebRTC signaling
- * for voice hangouts and screen sharing.
+ * One open realtime connection. Each browser tab viewing a cloud scene holds
+ * one (a WebSocket, or an SSE stream as the fallback); it carries scene
+ * updates, presence, comment events and the WebRTC signaling for voice
+ * hangouts and screen sharing.
  */
 export type Connection = {
   id: string;
@@ -13,10 +25,13 @@ export type Connection = {
   userId: string | null;
   name: string;
   color: string;
-  res: ServerResponse;
+  transport: Transport;
   inHangout: boolean;
   sharingScreen: boolean;
 };
+
+/** Drop clients that fall this far behind rather than buffering forever. */
+const MAX_BACKLOG_BYTES = 16 * 1024 * 1024;
 
 export type Participant = {
   connectionId: string;
@@ -58,7 +73,7 @@ export class RealtimeHub {
     this.heartbeat = setInterval(() => {
       for (const channel of this.channels.values()) {
         for (const connection of channel.values()) {
-          connection.res.write(": ping\n\n");
+          connection.transport.heartbeat();
         }
       }
     }, 25_000);
@@ -69,13 +84,14 @@ export class RealtimeHub {
     clearInterval(this.heartbeat);
     for (const channel of this.channels.values()) {
       for (const connection of channel.values()) {
-        connection.res.end();
+        connection.transport.close();
       }
     }
     this.channels.clear();
   }
 
-  connect(
+  /** Server-Sent Events fallback (and what REST/MCP-style clients use). */
+  connectSSE(
     channel: string,
     res: ServerResponse,
     user: { id: string | null; name: string },
@@ -86,6 +102,53 @@ export class RealtimeHub {
       Connection: "keep-alive",
       "X-Accel-Buffering": "no",
     });
+    const connection = this.connect(
+      channel,
+      {
+        send: (event, data) =>
+          res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`),
+        heartbeat: () => res.write(": ping\n\n"),
+        close: () => res.end(),
+        backlog: () => res.writableLength,
+      },
+      user,
+    );
+    res.on("close", () => this.disconnect(connection));
+    return connection;
+  }
+
+  /** A WebSocket connection; frames are `{ event, data }` JSON. */
+  connectWebSocket(
+    channel: string,
+    socket: WebSocketConnection,
+    user: { id: string | null; name: string },
+  ): Connection {
+    const connection = this.connect(
+      channel,
+      {
+        send: (event, data) => socket.send(JSON.stringify({ event, data })),
+        heartbeat: () => {
+          // a client that never answered the last ping is gone
+          if (!socket.alive()) {
+            socket.close(1001, "Ping timeout");
+            return;
+          }
+          socket.ping();
+        },
+        close: () => socket.close(1001, "Server closing"),
+        backlog: () => socket.bufferedAmount(),
+      },
+      user,
+    );
+    socket.onClose(() => this.disconnect(connection));
+    return connection;
+  }
+
+  private connect(
+    channel: string,
+    transport: Transport,
+    user: { id: string | null; name: string },
+  ): Connection {
     let connections = this.channels.get(channel);
     if (!connections) {
       connections = new Map();
@@ -97,7 +160,7 @@ export class RealtimeHub {
       userId: user.id,
       name: user.name,
       color: COLORS[connections.size % COLORS.length],
-      res,
+      transport,
       inHangout: false,
       sharingScreen: false,
     };
@@ -107,23 +170,26 @@ export class RealtimeHub {
       color: connection.color,
     });
     this.broadcastPresence(channel);
-
-    res.on("close", () => {
-      const current = this.channels.get(channel);
-      current?.delete(connection.id);
-      if (current && !current.size) {
-        this.channels.delete(channel);
-      } else {
-        if (connection.inHangout) {
-          this.broadcast(channel, "signal", {
-            type: "hangout-leave",
-            from: connection.id,
-          });
-        }
-        this.broadcastPresence(channel);
-      }
-    });
     return connection;
+  }
+
+  disconnect(connection: Connection) {
+    const { channel } = connection;
+    const current = this.channels.get(channel);
+    if (!current?.delete(connection.id)) {
+      return;
+    }
+    if (!current.size) {
+      this.channels.delete(channel);
+      return;
+    }
+    if (connection.inHangout) {
+      this.broadcast(channel, "signal", {
+        type: "hangout-leave",
+        from: connection.id,
+      });
+    }
+    this.broadcastPresence(channel);
   }
 
   get(channel: string, connectionId: string) {
@@ -142,7 +208,16 @@ export class RealtimeHub {
   }
 
   send(connection: Connection, event: string, data: unknown) {
-    connection.res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    if (connection.transport.backlog() > MAX_BACKLOG_BYTES) {
+      // too slow to keep up; it reconnects and resyncs from the database
+      connection.transport.close();
+      return;
+    }
+    try {
+      connection.transport.send(event, data);
+    } catch {
+      // the connection is closing; its close handler cleans up
+    }
   }
 
   broadcast(
@@ -168,7 +243,7 @@ export class RealtimeHub {
   closeChannel(channel: string) {
     for (const connection of this.channels.get(channel)?.values() ?? []) {
       this.send(connection, "scene-deleted", {});
-      connection.res.end();
+      connection.transport.close();
     }
     this.channels.delete(channel);
   }
