@@ -1,11 +1,14 @@
 import { Dialog } from "@excalidraw/excalidraw/components/Dialog";
 import { FilledButton } from "@excalidraw/excalidraw/components/FilledButton";
+import { Select } from "@excalidraw/excalidraw/components/Select";
 import { useEffect, useRef, useState } from "react";
 
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 
 import { useAtom, useAtomValue, useSetAtom } from "../../app-jotai";
+import { notificationEngine } from "../../notifications";
 import { plusAPI, PlusAPIError } from "../api";
+import { startPlusNotificationsSync } from "../notificationsSync";
 import {
   activeCommentIdAtom,
   cloudSceneAtom,
@@ -109,18 +112,16 @@ const SaveToCloudDialog = ({ api }: { api: ExcalidrawImperativeAPI }) => {
           />
         </Field>
         <Field label="Workspace">
-          <select
+          <Select
             className="plus-select"
+            label="Workspace"
             value={teamId}
-            onChange={(event) => setTeamId(event.target.value)}
-          >
-            <option value="">My scenes</option>
-            {teams.map((team) => (
-              <option key={team.id} value={team.id}>
-                {team.name}
-              </option>
-            ))}
-          </select>
+            options={[
+              { value: "", label: "My scenes" },
+              ...teams.map((team) => ({ value: team.id, label: team.name })),
+            ]}
+            onChange={setTeamId}
+          />
         </Field>
         <ErrorText error={error} />
         <FilledButton
@@ -155,6 +156,41 @@ export const PlusRoot = ({ api }: { api: ExcalidrawImperativeAPI }) => {
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, [cloudStatus.state]);
+
+  // real-time server notifications + workspace user directory sync
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+    return startPlusNotificationsSync(user);
+  }, [user]);
+
+  // seed knownUsers from active cloud scene participants/members for canvas @mentions
+  useEffect(() => {
+    if (!scene?.id || !user) {
+      return;
+    }
+    let cancelled = false;
+    plusAPI
+      .listPeople(scene.id)
+      .then(({ people }) => {
+        if (!cancelled) {
+          notificationEngine.registerKnownUsers(
+            people.map((person) => ({
+              id: person.userId,
+              username: person.name,
+              email: person.email,
+              avatarUrl: person.avatarUrl,
+              source: "plus",
+            })),
+          );
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [scene?.id, user]);
 
   // unread @-mentions for the Workspace badge
   const setUnreadMentions = useSetAtom(mentionsUnreadAtom);

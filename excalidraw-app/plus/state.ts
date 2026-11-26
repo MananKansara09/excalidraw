@@ -1,3 +1,9 @@
+import type {
+  Collaborator,
+  SocketId,
+  UserToFollow,
+} from "@excalidraw/excalidraw/types";
+
 import { atom } from "../app-jotai";
 
 import type { PlusComment, PlusUser, SceneRole } from "./api";
@@ -41,6 +47,7 @@ export type Participant = {
   connectionId: string;
   userId: string | null;
   name: string;
+  avatarUrl?: string | null;
   color: string;
   inHangout: boolean;
   sharingScreen: boolean;
@@ -48,6 +55,11 @@ export type Participant = {
 
 export const participantsAtom = atom<Participant[]>([]);
 export const connectionIdAtom = atom<string | null>(null);
+export const cloudCollaboratorsAtom = atom<Map<SocketId, Collaborator>>(
+  new Map(),
+);
+export const cloudUserToFollowAtom = atom<UserToFollow | null>(null);
+export const cloudFollowedActivityAtom = atom<string | null>(null);
 
 export const commentsAtom = atom<PlusComment[]>([]);
 /** Comment thread highlighted from a canvas pin. */

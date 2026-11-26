@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { plusAPI } from "../api";
 import { cloudSession, commentLinkURL } from "../cloud";
 
-import { initials, timeAgo, useAsyncAction } from "./ui";
+import { AvatarContent, timeAgo, useAsyncAction } from "./ui";
 import { CommentBody, MentionInput, mentionsInText } from "./MentionInput";
 
 import type { Mention, Person, PlusComment } from "../api";
@@ -66,7 +66,10 @@ const CommentRow = ({
     <div className="plus-popover__comment">
       <div className="plus-popover__meta">
         <span className="plus-avatar small" aria-hidden="true">
-          {initials(comment.author.name)}
+          <AvatarContent
+            name={comment.author.name}
+            avatarUrl={comment.author.avatarUrl}
+          />
         </span>
         <strong>{comment.author.name}</strong>
         <span className="plus-popover__time">
@@ -146,6 +149,8 @@ export const CommentPopover = ({
   userId,
   canModerate,
   people,
+  myName,
+  myAvatarUrl,
   index,
   total,
   onPrev,
@@ -160,6 +165,8 @@ export const CommentPopover = ({
   userId: string | null;
   canModerate: boolean;
   people: Person[];
+  myName: string;
+  myAvatarUrl: string | null;
   index: number;
   total: number;
   onPrev: () => void;
@@ -338,7 +345,7 @@ export const CommentPopover = ({
           }}
         >
           <span className="plus-avatar small" aria-hidden="true">
-            {initials(people.find((p) => p.userId === userId)?.name ?? "Me")}
+            <AvatarContent name={myName} avatarUrl={myAvatarUrl} />
           </span>
           <MentionInput
             label="Reply"

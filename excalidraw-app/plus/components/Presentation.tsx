@@ -23,8 +23,6 @@ import {
 } from "../state";
 import { getFrameName, getOrderedFrames } from "../export/frames";
 
-import { SmallButton } from "./ui";
-
 import type { Frame } from "../export/frames";
 
 /** The slide order for the open scene (cloud or local). */
@@ -95,14 +93,17 @@ export const PresentationPanel = ({
           label="Present"
           onClick={() => setPresentation({ active: true, index: 0 })}
         />
-        <SmallButton onClick={() => setDialog({ name: "export-frames" })}>
-          Export PDF / PPTX
-        </SmallButton>
+        <FilledButton
+          variant="outlined"
+          label="Export PDF / PPTX"
+          onClick={() => setDialog({ name: "export-frames" })}
+        />
       </div>
       <ol className="plus-slides">
         {frames.map((frame, index) => (
           <li key={frame.id} className="plus-slide">
             <button
+              type="button"
               className="plus-slide__name"
               onClick={() =>
                 api.setViewport({
@@ -114,31 +115,42 @@ export const PresentationPanel = ({
               title="Show this slide"
             >
               <span className="plus-slide__number">{index + 1}</span>
-              {getFrameName(frame, index)}
+              <span className="plus-slide__title">
+                {getFrameName(frame, index)}
+              </span>
             </button>
             <span className="plus-slide__actions">
-              <SmallButton
+              <button
+                type="button"
+                className="plus-slide__action"
                 title="Present from this slide"
+                aria-label="Present from this slide"
                 onClick={() => setPresentation({ active: true, index })}
               >
                 ▶
-              </SmallButton>
+              </button>
               {canReorder && (
                 <>
-                  <SmallButton
+                  <button
+                    type="button"
+                    className="plus-slide__action"
                     title="Move up"
+                    aria-label="Move up"
                     disabled={index === 0}
                     onClick={() => move(index, -1)}
                   >
                     ↑
-                  </SmallButton>
-                  <SmallButton
+                  </button>
+                  <button
+                    type="button"
+                    className="plus-slide__action"
                     title="Move down"
+                    aria-label="Move down"
                     disabled={index === frames.length - 1}
                     onClick={() => move(index, 1)}
                   >
                     ↓
-                  </SmallButton>
+                  </button>
                 </>
               )}
             </span>

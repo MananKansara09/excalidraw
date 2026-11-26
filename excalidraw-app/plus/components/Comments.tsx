@@ -24,8 +24,9 @@ import {
 } from "../state";
 
 import {
+  AvatarContent,
   ErrorText,
-  initials,
+  PlusAvatar,
   SmallButton,
   timeAgo,
   useAsyncAction,
@@ -90,15 +91,43 @@ const Thread = ({
   people: Person[];
 }) => {
   const [reply, setReply] = useState("");
+  const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [replyMentions, setReplyMentions] = useState<Mention[]>([]);
   const { pending, error, run } = useAsyncAction();
   const ref = useRef<HTMLLIElement>(null);
+  const setActive = useSetAtom(activeCommentIdAtom);
+  const [flash, setFlash] = useState(false);
+
+  const highlight = () => {
+    ref.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+    // restart the animation even when the same thread is clicked again
+    setFlash(false);
+    requestAnimationFrame(() => setFlash(true));
+  };
 
   useEffect(() => {
     if (active) {
-      ref.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      highlight();
     }
   }, [active]);
+
+  useEffect(() => {
+    if (!flash) {
+      return;
+    }
+    const timeout = setTimeout(() => setFlash(false), 1600);
+    return () => clearTimeout(timeout);
+  }, [flash]);
+
+  // clicking a thread (resolved ones have no pin) jumps to it on the canvas
+  const onThreadClick = (event: React.MouseEvent) => {
+    if ((event.target as HTMLElement).closest("button, input, textarea, a")) {
+      return;
+    }
+    setActive(thread.id);
+    highlight();
+    focusThread(api, thread);
+  };
 
   const sendReply = async () => {
     const text = reply.trim();
@@ -122,50 +151,100 @@ const Thread = ({
   return (
     <li
       ref={ref}
-      className={clsx("plus-thread", { resolved: thread.resolved, active })}
+      className={clsx("plus-thread", {
+        resolved: thread.resolved,
+        active,
+        flash,
+      })}
+      onClick={onThreadClick}
     >
-      {[thread, ...replies].map((comment) => (
-        <div key={comment.id} className="plus-comment">
-          <div className="plus-comment__meta">
-            <span className="plus-avatar small" aria-hidden="true">
-              {initials(comment.author.name)}
-            </span>
-            <strong>{comment.author.name}</strong>
-            <span className="plus-muted">{timeAgo(comment.createdAt)}</span>
-            {(comment.author.id === userId || canModerate) && (
-              <button
-                className="plus-icon-text danger"
-                title="Delete comment"
-                onClick={() => {
-                  if (
-                    comment.parentId ||
-                    window.confirm("Delete this thread and its replies?")
-                  ) {
-                    run(() => plusAPI.deleteComment(comment.id));
-                  }
-                }}
-              >
-                Delete
-              </button>
-            )}
-          </div>
-          <div className="plus-comment__body">
-            <CommentBody
-              body={comment.body}
-              mentions={comment.mentions}
-              myUserId={userId}
+      {[thread, ...replies].map((comment) => {
+        // only the person who wrote a comment can delete it
+        const isOwn = !!userId && comment.author.id === userId;
+        const confirming = confirmingId === comment.id;
+        return (
+          <div
+            key={comment.id}
+            className={clsx("plus-comment", { reply: !!comment.parentId })}
+          >
+            <PlusAvatar
+              name={comment.author.name}
+              avatarUrl={comment.author.avatarUrl}
+              size="small"
             />
+            <div className="plus-comment__main">
+              <div className="plus-comment__meta">
+                <strong className="plus-comment__author">
+                  {comment.author.name}
+                </strong>
+                <span className="plus-muted">{timeAgo(comment.createdAt)}</span>
+                {isOwn && !confirming && (
+                  <button
+                    className="plus-comment__delete"
+                    title="Delete comment"
+                    aria-label="Delete comment"
+                    onClick={() => setConfirmingId(comment.id)}
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      width="14"
+                      height="14"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v5M14 11v5" />
+                    </svg>
+                  </button>
+                )}
+                {isOwn && confirming && (
+                  <span className="plus-comment__confirm">
+                    <span>
+                      {comment.parentId ? "Delete?" : "Delete thread?"}
+                    </span>
+                    <button
+                      className="danger"
+                      onClick={() => {
+                        setConfirmingId(null);
+                        run(() => plusAPI.deleteComment(comment.id));
+                      }}
+                    >
+                      Yes
+                    </button>
+                    <button onClick={() => setConfirmingId(null)}>No</button>
+                  </span>
+                )}
+              </div>
+              <div className="plus-comment__body">
+                <CommentBody
+                  body={comment.body}
+                  mentions={comment.mentions}
+                  myUserId={userId}
+                />
+              </div>
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
       <div className="plus-thread__actions">
         {(thread.elementId || thread.x !== null) && (
-          <SmallButton onClick={() => focusThread(api, thread)}>
-            Show
-          </SmallButton>
+          <button
+            className="plus-thread__action"
+            onClick={() => {
+              setActive(thread.id);
+              highlight();
+              focusThread(api, thread);
+            }}
+          >
+            Show on canvas
+          </button>
         )}
         {(canModerate || thread.author.id === userId) && (
-          <SmallButton
+          <button
+            className="plus-thread__action"
             onClick={() =>
               run(() =>
                 plusAPI.updateComment(thread.id, {
@@ -175,7 +254,7 @@ const Thread = ({
             }
           >
             {thread.resolved ? "Reopen" : "Resolve"}
-          </SmallButton>
+          </button>
         )}
       </div>
       {userId && !thread.resolved && (
@@ -529,6 +608,8 @@ export const CommentPins = ({ api }: { api: ExcalidrawImperativeAPI }) => {
           userId={user?.id ?? null}
           canModerate={canModerate}
           people={people}
+          myName={user?.name ?? ""}
+          myAvatarUrl={user?.avatarUrl ?? null}
           index={shownIndex}
           total={open.length}
           onPrev={() => step(-1)}
@@ -561,7 +642,10 @@ export const CommentPins = ({ api }: { api: ExcalidrawImperativeAPI }) => {
         return (
           <button
             key={thread.id}
-            className={clsx("plus-pin", { active: thread.id === shownId })}
+            className={clsx("plus-pin", {
+              active: thread.id === shownId,
+              "has-avatar": !!thread.author.avatarUrl,
+            })}
             style={{ left: x, top: y }}
             aria-label={`Comment by ${thread.author.name}`}
             aria-expanded={thread.id === shownId}
@@ -576,7 +660,11 @@ export const CommentPins = ({ api }: { api: ExcalidrawImperativeAPI }) => {
               setHoverId(null);
             }}
           >
-            {initials(thread.author.name)}
+            <AvatarContent
+              name={thread.author.name}
+              avatarUrl={thread.author.avatarUrl}
+              imgClassName="plus-pin__avatar"
+            />
             {replies > 0 && (
               <span className="plus-pin__count">{replies + 1}</span>
             )}

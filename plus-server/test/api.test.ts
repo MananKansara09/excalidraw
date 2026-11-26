@@ -553,6 +553,205 @@ describe("realtime", () => {
   });
 });
 
+describe("realtime over WebSocket", () => {
+  const connect = (url: string) =>
+    new Promise<{
+      next: (event: string) => Promise<any>;
+      send: (message: unknown) => void;
+      close: () => void;
+    }>((resolve, reject) => {
+      const ws = new WebSocket(url.replace(/^http/, "ws"));
+      const queue: { event: string; data: any }[] = [];
+      const waiting: (() => void)[] = [];
+      ws.onmessage = (message) => {
+        queue.push(JSON.parse(String(message.data)));
+        waiting.splice(0).forEach((wake) => wake());
+      };
+      ws.onerror = () => reject(new Error("socket error"));
+      const next = async (event: string) => {
+        for (;;) {
+          const found = queue.findIndex((e) => e.event === event);
+          if (found >= 0) {
+            return queue.splice(found, 1)[0].data;
+          }
+          await new Promise<void>((wake) => waiting.push(wake));
+        }
+      };
+      ws.onopen = () =>
+        resolve({
+          next,
+          send: (message) => ws.send(JSON.stringify(message)),
+          close: () => ws.close(),
+        });
+    });
+
+  test("syncs edits, relays pointers and enforces roles", async () => {
+    const { api } = await signUp(server.base, "wsowner");
+    const scene = (await api.post("/api/v1/scenes", { name: "WS" })).json.scene;
+    const links = async (role: string) =>
+      (await api.post(`/api/v1/scenes/${scene.id}/links`, { role })).json.links;
+    const editorToken = (await links("editor")).find(
+      (l: any) => l.role === "editor",
+    ).token;
+    const viewerToken = (await links("viewer")).find(
+      (l: any) => l.role === "viewer",
+    ).token;
+    const url = (token: string, name: string) =>
+      `${server.base}/api/v1/scenes/${scene.id}/ws?share=${token}&name=${name}`;
+
+    const alice = await connect(url(editorToken, "Alice"));
+    const aliceId = (await alice.next("hello")).connectionId;
+    const bob = await connect(url(viewerToken, "Bob"));
+    await bob.next("hello");
+
+    // an edit is acked to the sender, pushed to the others, and persisted
+    alice.send({
+      type: "sync",
+      id: "1",
+      elements: [element("ws-el", 1)],
+    });
+    const ack = await alice.next("sync-ack");
+    assert.equal(ack.id, "1");
+    assert.equal(ack.accepted, 1);
+    const update = await bob.next("scene-update");
+    assert.deepEqual(
+      update.elements.map((e: any) => e.id),
+      ["ws-el"],
+    );
+    const saved = (await api.get(`/api/v1/scenes/${scene.id}`)).json.scene;
+    assert.deepEqual(
+      saved.elements.map((e: any) => e.id),
+      ["ws-el"],
+    );
+
+    // a viewer can't edit
+    bob.send({ type: "sync", id: "2", elements: [element("nope", 1)] });
+    const denied = await bob.next("sync-error");
+    assert.equal(denied.id, "2");
+    assert.equal(denied.status, 403);
+
+    // pointers are relayed to everyone else
+    alice.send({
+      type: "signal",
+      signal: "pointer",
+      data: { pointer: { x: 1, y: 2, tool: "pointer" } },
+    });
+    const pointer = await bob.next("signal");
+    assert.equal(pointer.type, "pointer");
+    assert.equal(pointer.from, aliceId);
+
+    alice.send({ type: "ping", t: 7 });
+    assert.deepEqual(await alice.next("pong"), { t: 7 });
+
+    // follow-start, viewport, and follow-stop targeted signals relay between peers
+    const bobPeer = await connect(url(viewerToken, "BobFollow"));
+    const bobPeerId = (await bobPeer.next("hello")).connectionId;
+
+    alice.send({
+      type: "signal",
+      signal: "follow-start",
+      to: bobPeerId,
+      data: {},
+    });
+    assert.deepEqual(await bobPeer.next("signal"), {
+      type: "follow-start",
+      from: aliceId,
+      data: {},
+    });
+
+    const bounds = [-200, -100, 600, 400];
+    bobPeer.send({
+      type: "signal",
+      signal: "viewport",
+      to: aliceId,
+      data: { sceneBounds: bounds },
+    });
+    assert.deepEqual(await alice.next("signal"), {
+      type: "viewport",
+      from: bobPeerId,
+      data: { sceneBounds: bounds },
+    });
+
+    alice.send({
+      type: "signal",
+      signal: "follow-stop",
+      to: bobPeerId,
+      data: {},
+    });
+    assert.deepEqual(await bobPeer.next("signal"), {
+      type: "follow-stop",
+      from: aliceId,
+      data: {},
+    });
+
+    bobPeer.close();
+    alice.close();
+    bob.close();
+  });
+
+  test("carries large and rapid messages intact", async () => {
+    const { api } = await signUp(server.base, "wsbig");
+    const scene = (await api.post("/api/v1/scenes", { name: "Big" })).json
+      .scene;
+    const token = (
+      await api.post(`/api/v1/scenes/${scene.id}/links`, { role: "editor" })
+    ).json.links[0].token;
+    const url = `${server.base}/api/v1/scenes/${scene.id}/ws?share=${token}`;
+    const alice = await connect(url);
+    await alice.next("hello");
+    const bob = await connect(url);
+    await bob.next("hello");
+
+    // > 64 KiB exercises the 64-bit frame length path
+    const dataURL = `data:image/png;base64,${"A".repeat(300_000)}`;
+    alice.send({
+      type: "sync",
+      id: "big",
+      elements: [element("img", 1, { type: "image", fileId: "f1" })],
+      files: { f1: { id: "f1", mimeType: "image/png", dataURL } },
+    });
+    assert.equal((await alice.next("sync-ack")).accepted, 1);
+    assert.deepEqual((await bob.next("scene-update")).fileIds, ["f1"]);
+    const files = (await api.get(`/api/v1/scenes/${scene.id}/files`)).json
+      .files;
+    assert.equal(files.f1.dataURL.length, dataURL.length);
+
+    // a burst of back-to-back edits all arrive, in order
+    for (let version = 2; version <= 51; version++) {
+      alice.send({
+        type: "sync",
+        id: `v${version}`,
+        elements: [element("burst", version, { x: version })],
+      });
+    }
+    let last = 0;
+    while (last < 51) {
+      const update = await bob.next("scene-update");
+      const burst = update.elements.find((e: any) => e.id === "burst");
+      if (burst) {
+        assert.ok(burst.version > last);
+        last = burst.version;
+      }
+    }
+    alice.close();
+    bob.close();
+  });
+
+  test("rejects sockets without access", async () => {
+    const { api } = await signUp(server.base, "wsprivate");
+    const scene = (await api.post("/api/v1/scenes", { name: "Private" })).json
+      .scene;
+    const failed = await new Promise<boolean>((resolve) => {
+      const ws = new WebSocket(
+        `${server.base.replace(/^http/, "ws")}/api/v1/scenes/${scene.id}/ws`,
+      );
+      ws.onopen = () => resolve(false);
+      ws.onerror = () => resolve(true);
+    });
+    assert.equal(failed, true);
+  });
+});
+
 describe("AI", () => {
   test("streams in the editor's SSE format and enforces the daily limit", async () => {
     const limited = await startTestServer({ aiDailyLimit: 1 });
@@ -928,5 +1127,373 @@ describe("rtc config", () => {
     assert.deepEqual(res.json, {
       iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
     });
+  });
+});
+
+describe("user avatars", () => {
+  test("updates avatarUrl, rejects unsafe values, and propagates to comments, mentions, access, teams, and presence", async () => {
+    const { api: alice, user: aliceUser } = await signUp(server.base, "av1");
+    const { api: bob, user: bobUser } = await signUp(server.base, "av2");
+    assert.equal(aliceUser.avatarUrl, null);
+
+    const svgAvatar =
+      "data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3C%2Fsvg%3E";
+    const pngAvatar =
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aF9cAAAAASUVORK5CYII=";
+
+    // unsafe SVG or javascript URLs are rejected
+    assert.equal(
+      (
+        await alice.patch("/api/v1/me", {
+          // eslint-disable-next-line no-script-url
+          avatarUrl: "javascript:alert(1)",
+        })
+      ).status,
+      400,
+    );
+    assert.equal(
+      (
+        await alice.patch("/api/v1/me", {
+          avatarUrl:
+            "data:image/svg+xml;charset=utf-8,<svg><script>alert(1)</script></svg>",
+        })
+      ).status,
+      400,
+    );
+
+    const updated = await alice.patch("/api/v1/me", { avatarUrl: svgAvatar });
+    assert.equal(updated.status, 200);
+    assert.equal(updated.json.user.avatarUrl, svgAvatar);
+    assert.equal(
+      (await alice.get("/api/v1/me")).json.user.avatarUrl,
+      svgAvatar,
+    );
+
+    // team + scene + access + comments + mentions all expose avatarUrl
+    const team = (await alice.post("/api/v1/teams", { name: "AvTeam" })).json
+      .team;
+    assert.equal(team.members[0].avatarUrl, svgAvatar);
+
+    const scene = (await alice.post("/api/v1/scenes", { name: "AvScene" })).json
+      .scene;
+    const access = (
+      await alice.post(`/api/v1/scenes/${scene.id}/access`, {
+        email: "av2@example.com",
+        role: "editor",
+      })
+    ).json;
+    assert.equal(access.owner.avatarUrl, svgAvatar);
+    assert.equal(access.collaborators[0].avatarUrl, null);
+
+    const people = (await bob.get(`/api/v1/scenes/${scene.id}/people`)).json
+      .people;
+    assert.equal(
+      people.find((p: any) => p.userId === aliceUser.id).avatarUrl,
+      svgAvatar,
+    );
+
+    const comment = (
+      await alice.post(`/api/v1/scenes/${scene.id}/comments`, {
+        body: `@${bobUser.name} look at this`,
+        mentions: [{ userId: bobUser.id }],
+      })
+    ).json.comment;
+    assert.equal(comment.author.avatarUrl, svgAvatar);
+
+    const commentsList = (await bob.get(`/api/v1/scenes/${scene.id}/comments`))
+      .json.comments;
+    assert.equal(commentsList[0].author.avatarUrl, svgAvatar);
+
+    const inbox = (await bob.get("/api/v1/me/mentions")).json.mentions;
+    assert.equal(inbox[0].author.avatarUrl, svgAvatar);
+
+    // live presence receives initial avatarUrl and broadcasts updates
+    const aliceKey = (
+      await alice.post("/api/v1/me/api-keys", { name: "ws-alice" })
+    ).json.key;
+    const bobKey = (await bob.post("/api/v1/me/api-keys", { name: "sse-bob" }))
+      .json.key;
+
+    const openSSE = async (bearer: string) => {
+      const controller = new AbortController();
+      const response = await fetch(
+        `${server.base}/api/v1/scenes/${scene.id}/events`,
+        {
+          headers: { Authorization: `Bearer ${bearer}` },
+          signal: controller.signal,
+        },
+      );
+      const reader = response.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      const events: { event: string; data: any }[] = [];
+      const next = async (eventName: string) => {
+        for (;;) {
+          const idx = events.findIndex((e) => e.event === eventName);
+          if (idx >= 0) {
+            return events.splice(idx, 1)[0].data;
+          }
+          const { value, done } = await reader.read();
+          if (done) {
+            throw new Error(`stream ended waiting for ${eventName}`);
+          }
+          buffer += decoder.decode(value, { stream: true });
+          const frames = buffer.split("\n\n");
+          buffer = frames.pop()!;
+          for (const frame of frames) {
+            const eventMatch = /^event: (.+)$/m.exec(frame);
+            const dataMatch = /^data: (.+)$/m.exec(frame);
+            if (eventMatch && dataMatch) {
+              events.push({
+                event: eventMatch[1],
+                data: JSON.parse(dataMatch[1]),
+              });
+            }
+          }
+        }
+      };
+      await next("hello");
+      return {
+        next,
+        events,
+        close: () => controller.abort(),
+      };
+    };
+
+    const bobStream = await openSSE(bobKey);
+    const aliceStream = await openSSE(aliceKey);
+
+    const waitPresence = async (
+      predicate: (participants: any[]) => boolean,
+    ) => {
+      for (const item of bobStream.events) {
+        if (item.event === "presence" && predicate(item.data.participants)) {
+          return item.data.participants;
+        }
+      }
+      for (;;) {
+        const data = await bobStream.next("presence");
+        if (predicate(data.participants)) {
+          return data.participants;
+        }
+      }
+    };
+
+    const initialParticipants = await waitPresence((list) =>
+      list.some((p) => p.userId === aliceUser.id && p.avatarUrl === svgAvatar),
+    );
+    assert.ok(initialParticipants.length >= 2);
+
+    await alice.patch("/api/v1/me", { avatarUrl: pngAvatar });
+    await waitPresence((list) =>
+      list.some((p) => p.userId === aliceUser.id && p.avatarUrl === pngAvatar),
+    );
+
+    // clearing avatarUrl sets it back to null
+    const cleared = await alice.patch("/api/v1/me", { avatarUrl: null });
+    assert.equal(cleared.json.user.avatarUrl, null);
+    await waitPresence((list) =>
+      list.some((p) => p.userId === aliceUser.id && p.avatarUrl === null),
+    );
+
+    aliceStream.close();
+    bobStream.close();
+  });
+});
+
+describe("notifications", () => {
+  test("pushes real-time notifications for team invites, scene shares, new/assigned scenes, canvas mentions, and chat replies", async () => {
+    const { api: alice, user: aliceUser } = await signUp(
+      server.base,
+      "notif-alice",
+    );
+    const { api: bob, user: bobUser } = await signUp(
+      server.base,
+      "notif-bob",
+    );
+    const { api: carol } = await signUp(server.base, "notif-carol");
+
+    const bobKey = (
+      await bob.post("/api/v1/me/api-keys", { name: "notif-sse" })
+    ).json.key;
+
+    const controller = new AbortController();
+    const sseRes = await fetch(`${server.base}/api/v1/notifications/events`, {
+      headers: { Authorization: `Bearer ${bobKey}` },
+      signal: controller.signal,
+    });
+    assert.equal(sseRes.status, 200);
+    const reader = sseRes.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    const pushed: any[] = [];
+    const nextEvent = async (eventName: string) => {
+      for (;;) {
+        const idx = pushed.findIndex((e) => e.event === eventName);
+        if (idx >= 0) {
+          return pushed.splice(idx, 1)[0].data;
+        }
+        const { value, done } = await reader.read();
+        if (done) {
+          throw new Error(`stream ended waiting for ${eventName}`);
+        }
+        buffer += decoder.decode(value, { stream: true });
+        const frames = buffer.split("\n\n");
+        buffer = frames.pop()!;
+        for (const frame of frames) {
+          const eventMatch = /^event: (.+)$/m.exec(frame);
+          const dataMatch = /^data: (.+)$/m.exec(frame);
+          if (eventMatch && dataMatch) {
+            pushed.push({
+              event: eventMatch[1],
+              data: JSON.parse(dataMatch[1]),
+            });
+          }
+        }
+      }
+    };
+    await nextEvent("hello");
+
+    // 1. Adding member to team notifies them in real time
+    const team = (
+      await alice.post("/api/v1/teams", { name: "Design Squad" })
+    ).json.team;
+    const inviteRes = await alice.post(`/api/v1/teams/${team.id}/invites`, {
+      email: bobUser.email,
+      role: "member",
+    });
+    assert.equal(inviteRes.status, 200);
+    const teamNotif = (await nextEvent("notification")).notification;
+    assert.equal(teamNotif.type, "team_added");
+    assert.equal(teamNotif.teamId, team.id);
+
+    // 2. Creating a new scene in the team with a canvas @mention notifies Bob
+    const sceneRes = await alice.post("/api/v1/scenes", {
+      name: "Roadmap Board",
+      teamId: team.id,
+      elements: [
+        {
+          id: "txt-mention-1",
+          type: "text",
+          x: 10,
+          y: 20,
+          text: `Hey @${bobUser.name} please review`,
+          originalText: `Hey @${bobUser.name} please review`,
+        },
+      ],
+    });
+    assert.equal(sceneRes.status, 200);
+    const scene = sceneRes.json.scene;
+
+    const sceneAssigned = (await nextEvent("notification")).notification;
+    const canvasMention = (await nextEvent("notification")).notification;
+    assert.deepEqual(
+      [sceneAssigned.type, canvasMention.type].sort(),
+      ["canvas_mention", "scene_assigned"],
+    );
+
+    // 3. Sharing / assigning a personal scene with Carol notifies Carol
+    const personalScene = (
+      await alice.post("/api/v1/scenes", { name: "Private Spec" })
+    ).json.scene;
+    const shareRes = await alice.post(
+      `/api/v1/scenes/${personalScene.id}/access`,
+      {
+        email: "notif-carol@example.com",
+        role: "editor",
+      },
+    );
+    assert.equal(shareRes.status, 200);
+    const carolInbox = (await carol.get("/api/v1/notifications")).json;
+    assert.equal(carolInbox.unread, 1);
+    assert.equal(carolInbox.notifications[0].type, "scene_share");
+    assert.equal(carolInbox.notifications[0].sceneId, personalScene.id);
+
+    // 4. Moving / assigning a personal scene to the team notifies Bob
+    await alice.patch(`/api/v1/scenes/${personalScene.id}`, {
+      teamId: team.id,
+    });
+    const reassigned = (await nextEvent("notification")).notification;
+    assert.equal(reassigned.type, "scene_assigned");
+    assert.equal(reassigned.sceneId, personalScene.id);
+
+    // 5. Syncing canvas mentions on an existing scene notifies & deduplicates
+    const syncRes = await alice.post(`/api/v1/scenes/${scene.id}/mentions/sync`, {
+      mentions: [
+        {
+          elementId: "txt-mention-2",
+          textSnippet: "Assigning @notif-bob here",
+          recipientNameOrHandle: bobUser.name,
+          x: 50,
+          y: 60,
+        },
+      ],
+    });
+    assert.equal(syncRes.status, 200);
+    assert.equal(syncRes.json.notified, 1);
+    const syncedCanvasNotif = (await nextEvent("notification")).notification;
+    assert.equal(syncedCanvasNotif.type, "canvas_mention");
+    assert.equal(syncedCanvasNotif.elementId, "txt-mention-2");
+
+    // Duplicate sync of same element/user is ignored
+    const dupSyncRes = await alice.post(
+      `/api/v1/scenes/${scene.id}/mentions/sync`,
+      {
+        mentions: [
+          {
+            elementId: "txt-mention-2",
+            textSnippet: "Assigning @notif-bob here",
+            recipientNameOrHandle: bobUser.name,
+          },
+        ],
+      },
+    );
+    assert.equal(dupSyncRes.json.notified, 0);
+
+    // 6. Comment @mention + thread reply notifications
+    const rootComment = (
+      await alice.post(`/api/v1/scenes/${scene.id}/comments`, {
+        body: `Hello @${bobUser.name}, what do you think?`,
+        mentions: [{ userId: bobUser.id, name: bobUser.name }],
+      })
+    ).json.comment;
+    const commentMentionNotif = (await nextEvent("notification")).notification;
+    assert.equal(commentMentionNotif.type, "comment_mention");
+    assert.equal(commentMentionNotif.commentId, rootComment.id);
+
+    // Bob replies to Alice's thread -> Alice gets comment_reply
+    await bob.post(`/api/v1/scenes/${scene.id}/comments`, {
+      body: "Looks good to me!",
+      parentId: rootComment.id,
+    });
+    const aliceInbox = (await alice.get("/api/v1/notifications")).json;
+    assert.ok(
+      aliceInbox.notifications.some(
+        (n: any) =>
+          n.type === "comment_reply" &&
+          n.commentId === rootComment.id &&
+          n.actor.id === bobUser.id,
+      ),
+    );
+    assert.ok(aliceUser.id);
+
+    // 7. Read / read-all / delete / clear endpoints
+    const bobListBefore = (await bob.get("/api/v1/notifications")).json;
+    assert.ok(bobListBefore.unread >= 5);
+    await bob.post(`/api/v1/notifications/${teamNotif.id}/read`);
+    const bobAfterOneRead = (await bob.get("/api/v1/notifications")).json;
+    assert.equal(bobAfterOneRead.unread, bobListBefore.unread - 1);
+
+    await bob.post("/api/v1/notifications/read-all");
+    assert.equal((await bob.get("/api/v1/notifications")).json.unread, 0);
+
+    await bob.delete(`/api/v1/notifications/${teamNotif.id}`);
+    await bob.delete("/api/v1/notifications");
+    assert.equal(
+      (await bob.get("/api/v1/notifications")).json.notifications.length,
+      0,
+    );
+
+    controller.abort();
   });
 });
