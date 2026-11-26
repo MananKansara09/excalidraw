@@ -4,7 +4,6 @@ import {
   restoreAppState,
   restoreElements,
 } from "@excalidraw/excalidraw";
-import { debounce } from "@excalidraw/common";
 import throttle from "lodash.throttle";
 
 import type {
@@ -73,7 +72,14 @@ type PointerPayload = {
 };
 
 /** Interval between pointer broadcasts. */
-const POINTER_INTERVAL_MS = 60;
+const POINTER_INTERVAL_MS = 40;
+/**
+ * Live edits go out at most this often (and immediately for the first change
+ * of a gesture), so collaborators see a drag or a stroke as it happens.
+ */
+const SYNC_INTERVAL_MS = 50;
+/** How quickly a remote cursor glides towards its latest position (per frame). */
+const CURSOR_EASING = 0.35;
 type SignalListener = (message: SignalMessage) => void;
 
 const toBinaryFiles = (files: Record<string, PlusFile> | undefined) =>
@@ -112,6 +118,14 @@ class CloudSession {
     selectedElementIds: {},
   };
   private lastSelectionKey = "";
+  /** Remote elements received but not yet applied (applied once per frame). */
+  private pendingRemote = new Map<string, ExcalidrawElement>();
+  private remoteFrame = 0;
+  /** Where each remote cursor is heading; the drawn one eases towards it. */
+  private cursorTargets = new Map<SocketId, { x: number; y: number }>();
+  private cursorFrame = 0;
+  private pointerInFlight = false;
+  private pointerQueued = false;
 
   get sceneId() {
     return this.scene?.id ?? null;
@@ -203,6 +217,12 @@ class CloudSession {
     appJotaiStore.set(participantsAtom, []);
     appJotaiStore.set(connectionIdAtom, null);
     this.sendPointer.cancel();
+    cancelAnimationFrame(this.remoteFrame);
+    cancelAnimationFrame(this.cursorFrame);
+    this.remoteFrame = this.cursorFrame = 0;
+    this.pendingRemote.clear();
+    this.cursorTargets.clear();
+    this.pointerInFlight = this.pointerQueued = false;
     this.collaborators.clear();
     this.lastSelectionKey = "";
     appJotaiStore.set(commentsAtom, []);
@@ -244,12 +264,22 @@ class CloudSession {
       appState.viewBackgroundColor !== this.syncedBackground ||
       (appState.name && appState.name !== this.syncedName);
     if (dirty) {
-      appJotaiStore.set(cloudStatusAtom, { state: "saving" });
+      if (appJotaiStore.get(cloudStatusAtom).state !== "saving") {
+        appJotaiStore.set(cloudStatusAtom, { state: "saving" });
+      }
       this.flush();
     }
   }
 
-  private flush = debounce(() => {
+  // throttled rather than debounced: a debounce never fires while the user
+  // keeps dragging or drawing, so others would only see the result afterwards
+  private flush = throttle(
+    () => this.runFlush(),
+    SYNC_INTERVAL_MS,
+    { leading: true, trailing: true },
+  );
+
+  private runFlush() {
     if (this.inFlight) {
       this.needsAnotherFlush = true;
       return;
@@ -261,7 +291,7 @@ class CloudSession {
         this.flush();
       }
     });
-  }, 400);
+  }
 
   private async push() {
     const api = this.api;
@@ -340,7 +370,28 @@ class CloudSession {
 
   // server → local -------------------------------------------------------------
 
+  /** Queues remote elements; a burst of updates is applied in one frame. */
   private applyRemoteElements(remote: readonly ExcalidrawElement[]) {
+    if (!this.api || !remote.length) {
+      return;
+    }
+    for (const element of remote) {
+      const queued = this.pendingRemote.get(element.id);
+      if (!queued || element.version >= queued.version) {
+        this.pendingRemote.set(element.id, element);
+      }
+    }
+    if (!this.remoteFrame) {
+      this.remoteFrame = requestAnimationFrame(() => {
+        this.remoteFrame = 0;
+        const batch = [...this.pendingRemote.values()];
+        this.pendingRemote.clear();
+        this.applyRemoteElementsNow(batch);
+      });
+    }
+  }
+
+  private applyRemoteElementsNow(remote: readonly ExcalidrawElement[]) {
     const api = this.api;
     if (!api || !remote.length) {
       return;
@@ -525,11 +576,27 @@ class CloudSession {
 
   private sendPointer = throttle(
     () => {
-      if (this.scene && appJotaiStore.get(connectionIdAtom)) {
-        this.signal("pointer", this.lastPointer).catch(() => {
-          // pointers are best-effort; the next move sends a fresh one
-        });
+      if (!this.scene || !appJotaiStore.get(connectionIdAtom)) {
+        return;
       }
+      // never stack requests: only the freshest pointer matters, so while one
+      // is on the wire remember that another is due and send it afterwards
+      if (this.pointerInFlight) {
+        this.pointerQueued = true;
+        return;
+      }
+      this.pointerInFlight = true;
+      this.signal("pointer", this.lastPointer)
+        .catch(() => {
+          // pointers are best-effort; the next move sends a fresh one
+        })
+        .finally(() => {
+          this.pointerInFlight = false;
+          if (this.pointerQueued) {
+            this.pointerQueued = false;
+            this.sendPointer();
+          }
+        });
     },
     POINTER_INTERVAL_MS,
     { leading: true, trailing: true },
@@ -544,13 +611,20 @@ class CloudSession {
       .get(participantsAtom)
       .find((p) => p.connectionId === from);
     const id = from as SocketId;
+    const previous = this.collaborators.get(id)?.pointer;
+    // glide from where the cursor is drawn now, instead of jumping
     const pointer: CollaboratorPointer | undefined = data?.pointer
       ? {
-          x: data.pointer.x,
-          y: data.pointer.y,
+          x: previous?.x ?? data.pointer.x,
+          y: previous?.y ?? data.pointer.y,
           tool: data.pointer.tool === "laser" ? "laser" : "pointer",
         }
       : undefined;
+    if (data?.pointer) {
+      this.cursorTargets.set(id, { x: data.pointer.x, y: data.pointer.y });
+    } else {
+      this.cursorTargets.delete(id);
+    }
     this.collaborators.set(id, {
       ...this.collaborators.get(id),
       id: participant?.userId ?? from,
@@ -562,6 +636,52 @@ class CloudSession {
       isInCall: participant?.inHangout,
     });
     this.renderCollaborators();
+    this.animateCursors();
+  }
+
+  /** Eases every remote cursor towards its latest reported position. */
+  private animateCursors() {
+    if (this.cursorFrame) {
+      return;
+    }
+    const step = () => {
+      this.cursorFrame = 0;
+      let moving = false;
+      for (const [id, target] of this.cursorTargets) {
+        const collaborator = this.collaborators.get(id);
+        const pointer = collaborator?.pointer;
+        if (!collaborator || !pointer) {
+          this.cursorTargets.delete(id);
+          continue;
+        }
+        const dx = target.x - pointer.x;
+        const dy = target.y - pointer.y;
+        if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) {
+          if (dx || dy) {
+            this.collaborators.set(id, {
+              ...collaborator,
+              pointer: { ...pointer, x: target.x, y: target.y },
+            });
+            moving = true;
+          }
+          continue;
+        }
+        this.collaborators.set(id, {
+          ...collaborator,
+          pointer: {
+            ...pointer,
+            x: pointer.x + dx * CURSOR_EASING,
+            y: pointer.y + dy * CURSOR_EASING,
+          },
+        });
+        moving = true;
+      }
+      if (moving && this.api) {
+        this.renderCollaborators();
+        this.cursorFrame = requestAnimationFrame(step);
+      }
+    };
+    this.cursorFrame = requestAnimationFrame(step);
   }
 
   /** Drops the cursors of people who left, refreshes names and call state. */
@@ -572,6 +692,7 @@ class CloudSession {
       const participant = byId.get(id);
       if (!participant) {
         this.collaborators.delete(id);
+        this.cursorTargets.delete(id);
         changed = true;
       } else if (
         collaborator.username !== participant.name ||
