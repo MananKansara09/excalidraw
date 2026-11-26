@@ -85,11 +85,11 @@ import {
   useAtom,
   useAtomValue,
   useAtomWithInitialValue,
+  useSetAtom,
   appJotaiStore,
 } from "./app-jotai";
 import {
   FIREBASE_STORAGE_PREFIXES,
-  isExcalidrawPlusSignedUser,
   STORAGE_KEYS,
   SYNC_BROWSER_TABS_TIMEOUT,
 } from "./app_constants";
@@ -147,8 +147,18 @@ import { ExcalidrawPlusIframeExport } from "./ExcalidrawPlusIframeExport";
 
 import "./index.scss";
 
-import { ExcalidrawPlusPromoBanner } from "./components/ExcalidrawPlusPromoBanner";
 import { AppSidebar } from "./components/AppSidebar";
+import { cloudSession, parseCloudHash } from "./plus/cloud";
+import { PlusRoot, usePlusSession } from "./plus/components/PlusRoot";
+import { PlusTopRight } from "./plus/components/PlusTopRight";
+import { hangout } from "./plus/hangout";
+import {
+  cloudSceneAtom,
+  plusDialogAtom,
+  plusUserAtom,
+  presentationAtom,
+} from "./plus/state";
+import "./plus/plus.scss";
 
 import type { CollabAPI } from "./collab/Collab";
 
@@ -232,6 +242,50 @@ const initializeScene = async (opts: {
   const externalUrlMatch = window.location.hash.match(/^#url=(.*)$/);
 
   const localDataState = importFromLocalStorage();
+
+  // Excalidraw Plus cloud scene (#cloud=<id> or #share=<token>)
+  const cloudHash = parseCloudHash();
+  if (cloudHash) {
+    try {
+      const cloudScene = await cloudSession.load(cloudHash);
+      cloudSession.start(opts.excalidrawAPI, cloudScene, cloudHash);
+      return {
+        scene: cloudSession.toInitialData(cloudScene, localDataState?.appState),
+        isExternalScene: false,
+      };
+    } catch (error: any) {
+      cloudSession.stop();
+      if (error?.status === 401 && cloudHash.sceneId) {
+        // private scene: sign in, then it opens (see AuthDialog)
+        appJotaiStore.set(plusDialogAtom, {
+          name: "auth",
+          mode: "signin",
+          reason: "Sign in to open this scene.",
+        });
+      } else {
+        window.history.replaceState({}, APP_NAME, window.location.origin);
+      }
+      return {
+        scene: {
+          elements: restoreElements(localDataState?.elements, null, {
+            repairBindings: true,
+            deleteInvisibleElements: true,
+          }),
+          appState: {
+            ...restoreAppState(localDataState?.appState, null),
+            errorMessage:
+              error?.status === 401
+                ? null
+                : `Couldn't open the cloud scene: ${error?.message}`,
+          },
+        },
+        isExternalScene: false,
+      };
+    }
+  } else if (cloudSession.isActive()) {
+    // navigated back to the local canvas
+    cloudSession.stop();
+  }
 
   let scene: Omit<
     RestoredDataState,
@@ -408,6 +462,12 @@ const ExcalidrawWrapper = () => {
 
   const [, setShareDialogState] = useAtom(shareDialogStateAtom);
   const [collabAPI] = useAtom(collabAPIAtom);
+
+  usePlusSession();
+  const cloudScene = useAtomValue(cloudSceneAtom);
+  const plusUser = useAtomValue(plusUserAtom);
+  const setPlusDialog = useSetAtom(plusDialogAtom);
+  const setPresentation = useSetAtom(presentationAtom);
   const [isCollaborating] = useAtomWithInitialValue(isCollaboratingAtom, () => {
     return isCollaborationLink(window.location.href);
   });
@@ -479,6 +539,14 @@ const ExcalidrawWrapper = () => {
   const loadImages = useCallback(
     (data: ResolutionType<typeof initializeScene>, isInitialLoad = false) => {
       if (!data.scene || !excalidrawAPI) {
+        return;
+      }
+
+      if (cloudSession.isActive()) {
+        // initial load passes files via initialData; hash changes don't
+        if (!isInitialLoad && data.scene.files) {
+          excalidrawAPI.addFiles(Object.values(data.scene.files));
+        }
         return;
       }
 
@@ -601,6 +669,8 @@ const ExcalidrawWrapper = () => {
       }
       if (
         !document.hidden &&
+        // a cloud scene syncs with the server, not with other tabs' local data
+        !cloudSession.isActive() &&
         ((collabAPI && !collabAPI.isCollaborating()) || isCollabDisabled)
       ) {
         // don't sync if local state is newer or identical to browser state
@@ -728,6 +798,8 @@ const ExcalidrawWrapper = () => {
     if (collabAPI?.isCollaborating()) {
       collabAPI.syncElements(elements);
     }
+
+    cloudSession.onLocalChange(elements, appState);
 
     // this check is redundant, but since this is a hot path, it's best
     // not to evaludate the nested expression every time
@@ -915,53 +987,99 @@ const ExcalidrawWrapper = () => {
     );
   }
 
-  const ExcalidrawPlusCommand = {
-    label: "Excalidraw+",
-    category: DEFAULT_CATEGORIES.links,
-    predicate: true,
-    icon: <div style={{ width: 14 }}>{ExcalLogo}</div>,
-    keywords: ["plus", "cloud", "server"],
-    perform: () => {
-      window.open(
-        `${
-          import.meta.env.VITE_APP_PLUS_LP
-        }/plus?utm_source=excalidraw&utm_medium=app&utm_content=command_palette`,
-        "_blank",
-      );
+  const plusIcon = <div style={{ width: 14 }}>{ExcalLogo}</div>;
+  const plusCommands = [
+    {
+      label: plusUser ? "Open workspace" : "Sign in",
+      category: DEFAULT_CATEGORIES.app,
+      predicate: true,
+      icon: plusIcon,
+      keywords: [
+        "plus",
+        "cloud",
+        "scenes",
+        "folders",
+        "teams",
+        "workspace",
+        "signin",
+        "login",
+        "signup",
+      ],
+      perform: () =>
+        setPlusDialog(
+          plusUser ? { name: "workspace" } : { name: "auth", mode: "signin" },
+        ),
     },
-  };
-  const ExcalidrawPlusAppCommand = {
-    label: "Sign up",
-    category: DEFAULT_CATEGORIES.links,
-    predicate: true,
-    icon: <div style={{ width: 14 }}>{ExcalLogo}</div>,
-    keywords: [
-      "excalidraw",
-      "plus",
-      "cloud",
-      "server",
-      "signin",
-      "login",
-      "signup",
-    ],
-    perform: () => {
-      window.open(
-        `${
-          import.meta.env.VITE_APP_PLUS_APP
-        }?utm_source=excalidraw&utm_medium=app&utm_content=command_palette`,
-        "_blank",
-      );
+    {
+      label: "Save to workspace",
+      category: DEFAULT_CATEGORIES.app,
+      predicate: () => !!plusUser && !cloudScene,
+      icon: plusIcon,
+      keywords: ["cloud", "save", "upload", "backup", "plus"],
+      perform: () => setPlusDialog({ name: "save-to-cloud" }),
     },
-  };
+    {
+      label: "Share cloud scene",
+      category: DEFAULT_CATEGORIES.app,
+      predicate: () => !!cloudScene && !cloudScene.embed,
+      icon: share,
+      keywords: ["share", "access", "permissions", "link", "embed", "readonly"],
+      perform: () => setPlusDialog({ name: "share" }),
+    },
+    {
+      label: "Close cloud scene (back to local canvas)",
+      category: DEFAULT_CATEGORIES.app,
+      predicate: () => !!cloudScene,
+      keywords: ["local", "close", "leave"],
+      perform: () => {
+        window.location.hash = "";
+      },
+    },
+    {
+      label: "Start presentation",
+      category: DEFAULT_CATEGORIES.app,
+      predicate: () =>
+        !!excalidrawAPI
+          ?.getSceneElements()
+          .some((element) => element.type === "frame"),
+      keywords: ["present", "slides", "slideshow", "frames"],
+      perform: () => setPresentation({ active: true, index: 0 }),
+    },
+    {
+      label: "Export frames to PDF / PowerPoint",
+      category: DEFAULT_CATEGORIES.export,
+      predicate: true,
+      keywords: ["pdf", "pptx", "powerpoint", "slides", "frames", "export"],
+      perform: () => setPlusDialog({ name: "export-frames" }),
+    },
+    {
+      label: "Join voice hangout",
+      category: DEFAULT_CATEGORIES.app,
+      predicate: () => !!cloudScene && !cloudScene.embed && !hangout.isJoined(),
+      keywords: ["voice", "call", "audio", "hangout", "screen", "share"],
+      perform: () => hangout.join(),
+    },
+    {
+      label: "Account & API keys",
+      category: DEFAULT_CATEGORIES.app,
+      predicate: () => !!plusUser,
+      keywords: ["account", "api", "key", "mcp", "ai", "profile", "logout"],
+      perform: () => setPlusDialog({ name: "account" }),
+    },
+  ];
 
   return (
     <div
       style={{ height: "100%" }}
       className={clsx("excalidraw-app", {
         "is-collaborating": isCollaborating,
+        "is-cloud-scene": !!cloudScene,
+        "is-embed": !!cloudScene?.embed,
       })}
     >
       <Excalidraw
+        viewModeEnabled={cloudScene?.role === "viewer" ? true : undefined}
+        zenModeEnabled={cloudScene?.embed ? true : undefined}
         viewportStatusFrame={viewportStatusFrame}
         userToFollow={userToFollow}
         onChange={onChange}
@@ -1009,17 +1127,14 @@ const ExcalidrawWrapper = () => {
         theme={editorTheme}
         onThemeChange={setAppTheme}
         renderTopRightUI={(isMobile) => {
-          if (isMobile || !collabAPI || !isCollabAvailable) {
-            return null;
+          if (isMobile || !collabAPI || !isCollabAvailable || cloudScene) {
+            // cloud scenes sync through the Plus server, not live rooms
+            return <PlusTopRight />;
           }
 
           return (
             <div className="excalidraw-ui-top-right">
-              {excalidrawAPI?.getEditorInterface().formFactor === "desktop" && (
-                <ExcalidrawPlusPromoBanner
-                  isSignedIn={isExcalidrawPlusSignedUser}
-                />
-              )}
+              <PlusTopRight />
 
               {collabError.message && <CollabError collabError={collabError} />}
               <LiveCollaborationTrigger
@@ -1076,6 +1191,7 @@ const ExcalidrawWrapper = () => {
         </OverwriteConfirmDialog>
         <AppFooter onChange={() => excalidrawAPI?.refresh()} />
         {excalidrawAPI && <AIComponents excalidrawAPI={excalidrawAPI} />}
+        {excalidrawAPI && <PlusRoot api={excalidrawAPI} />}
 
         <TTDDialogTrigger />
         {isCollaborating && isOffline && (
@@ -1263,14 +1379,7 @@ const ExcalidrawWrapper = () => {
                 );
               },
             },
-            ...(isExcalidrawPlusSignedUser
-              ? [
-                  {
-                    ...ExcalidrawPlusAppCommand,
-                    label: "Sign in / Go to Excalidraw+",
-                  },
-                ]
-              : [ExcalidrawPlusCommand, ExcalidrawPlusAppCommand]),
+            ...plusCommands,
 
             {
               label: t("overwriteConfirm.action.excalidrawPlus.button"),

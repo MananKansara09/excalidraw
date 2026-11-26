@@ -2,6 +2,9 @@ import {
   loginIcon,
   ExcalLogo,
   eyeIcon,
+  ExportIcon,
+  presentationIcon,
+  share,
 } from "@excalidraw/excalidraw/components/icons";
 import { useI18n } from "@excalidraw/excalidraw/i18n";
 import { MainMenu } from "@excalidraw/excalidraw/index";
@@ -11,8 +14,14 @@ import { isDevEnv } from "@excalidraw/common";
 
 import type { Theme } from "@excalidraw/element/types";
 
+import { useAtomValue, useSetAtom } from "../app-jotai";
 import { LanguageList } from "../app-language/LanguageList";
-import { isExcalidrawPlusSignedUser } from "../app_constants";
+import {
+  cloudSceneAtom,
+  plusDialogAtom,
+  plusUserAtom,
+  presentationAtom,
+} from "../plus/state";
 
 import { saveDebugState } from "./DebugCanvas";
 
@@ -24,6 +33,10 @@ export const AppMainMenu: React.FC<{
   refresh: () => void;
 }> = React.memo((props) => {
   const { t } = useI18n();
+  const user = useAtomValue(plusUserAtom);
+  const cloudScene = useAtomValue(cloudSceneAtom);
+  const setDialog = useSetAtom(plusDialogAtom);
+  const setPresentation = useSetAtom(presentationAtom);
   return (
     <MainMenu>
       <MainMenu.DefaultItems.LoadScene />
@@ -36,30 +49,66 @@ export const AppMainMenu: React.FC<{
           onSelect={() => props.onCollabDialogOpen()}
         />
       )}
+      <MainMenu.Item
+        icon={ExportIcon}
+        onSelect={() => setDialog({ name: "export-frames" })}
+      >
+        Export frames (PDF / PPTX)
+      </MainMenu.Item>
+      <MainMenu.Item
+        icon={presentationIcon}
+        onSelect={() => setPresentation({ active: true, index: 0 })}
+      >
+        Present frames
+      </MainMenu.Item>
       <MainMenu.DefaultItems.CommandPalette className="highlighted" />
       <MainMenu.DefaultItems.SearchMenu />
       <MainMenu.DefaultItems.Help />
       <MainMenu.DefaultItems.ClearCanvas />
       <MainMenu.Separator />
-      <MainMenu.ItemLink
-        icon={ExcalLogo}
-        href={`${
-          import.meta.env.VITE_APP_PLUS_LP
-        }/plus?utm_source=excalidraw&utm_medium=app&utm_content=hamburger`}
-        className=""
-      >
-        Excalidraw+
-      </MainMenu.ItemLink>
+      {user && (
+        <MainMenu.Item
+          icon={ExcalLogo}
+          onSelect={() => setDialog({ name: "workspace" })}
+        >
+          Workspace
+        </MainMenu.Item>
+      )}
+      {user && !cloudScene && (
+        <MainMenu.Item
+          icon={share}
+          onSelect={() => setDialog({ name: "save-to-cloud" })}
+        >
+          Save to workspace
+        </MainMenu.Item>
+      )}
+      {cloudScene && !cloudScene.embed && (
+        <MainMenu.Item
+          icon={ExcalLogo}
+          onSelect={() => {
+            window.location.hash = "";
+          }}
+        >
+          Back to local canvas
+        </MainMenu.Item>
+      )}
       <MainMenu.DefaultItems.Socials />
-      <MainMenu.ItemLink
-        icon={loginIcon}
-        href={`${import.meta.env.VITE_APP_PLUS_APP}${
-          isExcalidrawPlusSignedUser ? "" : "/sign-up"
-        }?utm_source=signin&utm_medium=app&utm_content=hamburger`}
-        className="highlighted"
-      >
-        {isExcalidrawPlusSignedUser ? t("labels.signIn") : t("labels.signUp")}
-      </MainMenu.ItemLink>
+      {user ? (
+        <MainMenu.Item
+          icon={loginIcon}
+          onSelect={() => setDialog({ name: "account" })}
+        >
+          Account ({user.name})
+        </MainMenu.Item>
+      ) : (
+        <MainMenu.Item
+          icon={loginIcon}
+          className="highlighted"
+          onSelect={() => setDialog({ name: "auth", mode: "signin" })}
+        >
+          {t("labels.signIn")} / {t("labels.signUp")}
+        </MainMenu.Item>
+      )}
       {isDevEnv() && (
         <MainMenu.Item
           icon={eyeIcon}

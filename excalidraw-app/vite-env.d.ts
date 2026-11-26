@@ -36,6 +36,15 @@ interface ImportMetaEnv {
 
   VITE_APP_PLUS_APP: string;
 
+  // Excalidraw Plus server API (plus-server/); defaults to same-origin /api/v1
+  VITE_APP_PLUS_API: string;
+
+  // Excalidraw Plus server origin the Vite dev server proxies /api and /mcp to
+  VITE_APP_PLUS_SERVER_URL: string;
+
+  // JSON array of RTCIceServer for voice hangouts / screen sharing
+  VITE_APP_PLUS_ICE_SERVERS: string;
+
   VITE_APP_GIT_SHA: string;
 
   MODE: string;

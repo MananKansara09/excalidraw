@@ -149,6 +149,17 @@ export default defineConfig(({ mode }) => {
       port: Number(envVars.VITE_APP_PORT || 3000),
       // open the browser
       open: true,
+      // Excalidraw Plus server (plus-server/), same-origin so its session
+      // cookie works: `yarn start:plus-server`
+      proxy: Object.fromEntries(
+        ["/api", "/mcp"].map((prefix) => [
+          prefix,
+          {
+            target: envVars.VITE_APP_PLUS_SERVER_URL || "http://localhost:3015",
+            changeOrigin: true,
+          },
+        ]),
+      ),
     },
     // We need to specify the envDir since now there are no
     //more located in parallel with the vite.config.ts file but in parent dir

@@ -1,0 +1,19 @@
+{
+  "name": "@excalidraw/plus-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Self-hosted backend for Excalidraw Plus features: cloud scenes, teams, sharing, comments, hangouts, AI, REST API and MCP",
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "scripts": {
+    "start": "node src/index.ts",
+    "dev": "node --watch src/index.ts",
+    "test": "node --test test/*.test.ts",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "1.14.0"
+  }
+}

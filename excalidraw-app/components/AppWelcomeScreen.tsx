@@ -4,13 +4,17 @@ import { useI18n } from "@excalidraw/excalidraw/i18n";
 import { WelcomeScreen } from "@excalidraw/excalidraw/index";
 import React from "react";
 
+import { useAtomValue, useSetAtom } from "../app-jotai";
 import { isExcalidrawPlusSignedUser } from "../app_constants";
+import { plusDialogAtom, plusUserAtom } from "../plus/state";
 
 export const AppWelcomeScreen: React.FC<{
   onCollabDialogOpen: () => any;
   isCollabEnabled: boolean;
 }> = React.memo((props) => {
   const { t } = useI18n();
+  const plusUser = useAtomValue(plusUserAtom);
+  const setPlusDialog = useSetAtom(plusDialogAtom);
   let headingContent;
 
   if (isExcalidrawPlusSignedUser) {
@@ -64,16 +68,24 @@ export const AppWelcomeScreen: React.FC<{
               onSelect={() => props.onCollabDialogOpen()}
             />
           )}
-          {!isExcalidrawPlusSignedUser && (
-            <WelcomeScreen.Center.MenuItemLink
-              href={`${
-                import.meta.env.VITE_APP_PLUS_LP
-              }/plus?utm_source=excalidraw&utm_medium=app&utm_content=welcomeScreenGuest`}
+          {plusUser ? (
+            <WelcomeScreen.Center.MenuItem
+              onSelect={() => setPlusDialog({ name: "workspace" })}
               shortcut={null}
               icon={loginIcon}
             >
-              {t("labels.signUp")}
-            </WelcomeScreen.Center.MenuItemLink>
+              Open workspace
+            </WelcomeScreen.Center.MenuItem>
+          ) : (
+            plusUser === null && (
+              <WelcomeScreen.Center.MenuItem
+                onSelect={() => setPlusDialog({ name: "auth", mode: "signup" })}
+                shortcut={null}
+                icon={loginIcon}
+              >
+                {t("labels.signUp")}
+              </WelcomeScreen.Center.MenuItem>
+            )
           )}
         </WelcomeScreen.Center.Menu>
       </WelcomeScreen.Center>

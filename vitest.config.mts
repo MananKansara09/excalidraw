@@ -1,6 +1,6 @@
 import path from "path";
 
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 
 export default defineConfig({
   resolve: {
@@ -80,6 +80,8 @@ export default defineConfig({
       hooks: "parallel",
     },
     setupFiles: ["./setupTests.ts"],
+    // plus-server tests run on Node's own test runner (`yarn test:plus-server`)
+    exclude: [...configDefaults.exclude, "plus-server/**"],
     globals: true,
     environment: "jsdom",
     // don't list skipped tests in the failure tree — keeps output readable
