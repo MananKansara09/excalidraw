@@ -12,6 +12,11 @@ export type ServerConfig = {
   secureCookies: boolean;
   /** Public origin of the web app, used for share/embed links. */
   publicUrl: string | null;
+  /**
+   * WebRTC ICE servers for voice and screen sharing. Add a TURN server so
+   * people on restrictive networks can connect.
+   */
+  iceServers?: unknown[];
 };
 
 export type AppContext = {

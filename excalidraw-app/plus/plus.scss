@@ -647,18 +647,142 @@
     flex-direction: column;
     gap: 0.75rem;
     padding-bottom: 1rem;
+    // stay inside the sidebar: fields and buttons must not run off its edge
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
 
     &__compose {
       display: flex;
       flex-direction: column;
       gap: 0.4rem;
-      align-items: flex-end;
 
       textarea {
         width: 100%;
         box-sizing: border-box;
         resize: vertical;
       }
+    }
+
+    &__compose-actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+
+      .plus-muted {
+        font-size: 0.75rem;
+      }
+    }
+
+    .plus-inline-form {
+      min-width: 0;
+    }
+  }
+
+  .plus-mention-input {
+    position: relative;
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+
+    input,
+    textarea {
+      width: 100%;
+      box-sizing: border-box;
+    }
+  }
+
+  .plus-mention-list {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    z-index: 5;
+    list-style: none;
+    margin: 0;
+    padding: 0.25rem;
+    border-radius: var(--plus-radius);
+    border: var(--plus-border);
+    background: var(--island-bg-color);
+    box-shadow: var(--shadow-island);
+
+    li {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.35rem 0.45rem;
+      border-radius: 6px;
+      cursor: pointer;
+
+      &.active {
+        background: var(--color-primary-light);
+        color: var(--color-primary-darkest);
+
+        .plus-muted {
+          color: inherit;
+          opacity: 0.75;
+        }
+      }
+    }
+
+    &__text {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      font-size: 0.85rem;
+      line-height: 1.2;
+
+      span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+    }
+  }
+
+  .plus-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.1rem;
+    height: 1.1rem;
+    margin-left: 0.35rem;
+    padding: 0 0.3rem;
+    border-radius: 999px;
+    background: var(--plus-danger);
+    color: #fff;
+    font-size: 0.7rem;
+    font-weight: 700;
+    line-height: 1;
+  }
+
+  .plus-mention-item {
+    gap: 0.35rem !important;
+
+    &__meta {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      flex-wrap: wrap;
+    }
+
+    &__body {
+      font-size: 0.9rem;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+  }
+
+  .plus-mention {
+    color: var(--color-primary);
+    font-weight: 600;
+
+    &.me {
+      padding: 0 0.15rem;
+      border-radius: 4px;
+      background: var(--color-primary-light);
+      color: var(--color-primary-darkest);
     }
   }
 
@@ -916,6 +1040,12 @@ body.plus-presenting .excalidraw {
   .plus-top-right {
     display: none !important;
   }
+}
+
+// cloud scenes list everyone (with call state) in the Plus top bar, so the
+// editor's own collaborator list would duplicate it
+.excalidraw-app.is-cloud-scene .excalidraw .UserList {
+  display: none;
 }
 
 // embeds are view-only and chrome-free

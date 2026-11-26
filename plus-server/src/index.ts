@@ -29,6 +29,23 @@ const loadSecret = () => {
   return readFileSync(file, "utf8").trim();
 };
 
+/** PLUS_ICE_SERVERS: a JSON array of RTCIceServer objects. */
+const parseIceServers = (value: string | undefined) => {
+  if (!value) {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) {
+      return parsed;
+    }
+  } catch {
+    // fall through
+  }
+  console.warn("Ignoring PLUS_ICE_SERVERS: it must be a JSON array");
+  return undefined;
+};
+
 const defaultStaticDir = resolve(here, "..", "..", "excalidraw-app", "build");
 const staticDir =
   env.PLUS_STATIC_DIR ||
@@ -44,6 +61,7 @@ const { server, ctx } = createApp({
     aiAnonymousDailyLimit: Number(env.PLUS_AI_ANON_DAILY_LIMIT || 10),
     secureCookies: env.PLUS_SECURE_COOKIES === "true",
     publicUrl: env.PLUS_PUBLIC_URL?.replace(/\/$/, "") || null,
+    iceServers: parseIceServers(env.PLUS_ICE_SERVERS),
   },
   ai: createAnthropicProvider(
     (env.PLUS_AI_EFFORT as "low" | "medium" | "high" | undefined) || "medium",

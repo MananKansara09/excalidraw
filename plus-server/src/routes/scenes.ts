@@ -1,4 +1,6 @@
 import {
+  getScenePeople,
+  resolveSceneRole,
   loadFolder,
   loadSceneForRole,
   requireTeamRole,
@@ -26,6 +28,7 @@ import {
 
 import type { AppContext } from "../context.ts";
 import type { Request, Router } from "../http.ts";
+
 import type { FolderRow, SceneRow } from "../access.ts";
 import type { User } from "../auth.ts";
 
@@ -71,6 +74,7 @@ type CommentRow = {
   x: number | null;
   y: number | null;
   body: string;
+  mentions: string;
   resolved: number;
   created_at: number;
   updated_at: number;
@@ -85,6 +89,10 @@ const commentJSON = (comment: CommentRow) => ({
   x: comment.x,
   y: comment.y,
   body: comment.body,
+  mentions: JSON.parse(comment.mentions || "[]") as {
+    userId: string;
+    name: string;
+  }[],
   resolved: !!comment.resolved,
   createdAt: comment.created_at,
   updatedAt: comment.updated_at,
@@ -593,6 +601,100 @@ export const registerSceneRoutes = (router: Router, ctx: AppContext) => {
 
   // comments -------------------------------------------------------------------
 
+  /**
+   * Keeps the mentions that name someone with access and still appear in the
+   * text as "@Name"; anything else a client sends is dropped.
+   */
+  const resolveMentions = (
+    scene: SceneRow,
+    mentions: unknown,
+    text: string,
+  ) => {
+    if (!Array.isArray(mentions)) {
+      return [];
+    }
+    const people = new Map(
+      getScenePeople(db, scene).map((person) => [person.userId, person]),
+    );
+    const seen = new Set<string>();
+    const result: { userId: string; name: string }[] = [];
+    for (const mention of mentions) {
+      const person = people.get(mention?.userId);
+      if (
+        person &&
+        !seen.has(person.userId) &&
+        text.includes(`@${person.name}`)
+      ) {
+        seen.add(person.userId);
+        result.push({ userId: person.userId, name: person.name });
+      }
+    }
+    return result;
+  };
+
+  router.get("/api/v1/scenes/:sceneId/people", (req) => {
+    const user = requireUser(db, req);
+    const { scene } = loadSceneForRole(
+      db,
+      req,
+      user,
+      req.params.sceneId,
+      "viewer",
+    );
+    return { people: getScenePeople(db, scene) };
+  });
+
+  /** Comments that mention the caller, newest first, with an unread count. */
+  router.get("/api/v1/me/mentions", (req) => {
+    const user = requireUser(db, req);
+    const rows = all<CommentRow & { scene_name: string; seen_at: number }>(
+      db,
+      `SELECT comments.*, users.name AS author_name, scenes.name AS scene_name
+       FROM comments
+       JOIN users ON users.id = comments.author_id
+       JOIN scenes ON scenes.id = comments.scene_id
+       WHERE comments.mentions LIKE ? ESCAPE '\\'
+       ORDER BY comments.created_at DESC LIMIT 100`,
+      `%"userId":"${user.id.replace(/[\\%_]/g, (c) => `\\${c}`)}"%`,
+    );
+    const seenAt =
+      get<{ mentions_seen_at: number }>(
+        db,
+        "SELECT mentions_seen_at FROM users WHERE id = ?",
+        user.id,
+      )?.mentions_seen_at ?? 0;
+    // drop mentions in scenes the user can no longer open
+    const visible = rows.filter((row) => {
+      const scene = get<SceneRow>(
+        db,
+        "SELECT * FROM scenes WHERE id = ?",
+        row.scene_id,
+      );
+      return !!scene && !!resolveSceneRole(db, scene, user, null);
+    });
+    return {
+      unread: visible.filter(
+        (row) => row.created_at > seenAt && row.author_id !== user.id,
+      ).length,
+      mentions: visible.map((row) => ({
+        ...commentJSON(row),
+        sceneName: row.scene_name,
+        unread: row.created_at > seenAt,
+      })),
+    };
+  });
+
+  router.post("/api/v1/me/mentions/seen", (req) => {
+    const user = requireUser(db, req);
+    run(
+      db,
+      "UPDATE users SET mentions_seen_at = ? WHERE id = ?",
+      now(),
+      user.id,
+    );
+    return { ok: true };
+  });
+
   router.get("/api/v1/scenes/:sceneId/comments", (req) => {
     const user = getUser(db, req);
     const { scene } = loadSceneForRole(
@@ -632,12 +734,14 @@ export const registerSceneRoutes = (router: Router, ctx: AppContext) => {
         );
       }
     }
+    const text = requireString(body.body, "body", { max: 5000 });
+    const mentions = resolveMentions(scene, body.mentions, text);
     const id = newId();
     const timestamp = now();
     run(
       db,
-      `INSERT INTO comments (id, scene_id, parent_id, author_id, element_id, x, y, body, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO comments (id, scene_id, parent_id, author_id, element_id, x, y, body, mentions, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       id,
       scene.id,
       parentId,
@@ -645,7 +749,8 @@ export const registerSceneRoutes = (router: Router, ctx: AppContext) => {
       optionalString(body.elementId, "elementId"),
       typeof body.x === "number" ? body.x : null,
       typeof body.y === "number" ? body.y : null,
-      requireString(body.body, "body", { max: 5000 }),
+      text,
+      JSON.stringify(mentions),
       timestamp,
       timestamp,
     );
@@ -672,10 +777,23 @@ export const registerSceneRoutes = (router: Router, ctx: AppContext) => {
       if (comment.author_id !== user.id) {
         throw forbidden("Only the author can edit a comment");
       }
+      const text = requireString(body.body, "body", { max: 5000 });
+      const scene = get<SceneRow>(
+        db,
+        "SELECT * FROM scenes WHERE id = ?",
+        comment.scene_id,
+      )!;
       run(
         db,
-        "UPDATE comments SET body = ?, updated_at = ? WHERE id = ?",
-        requireString(body.body, "body", { max: 5000 }),
+        "UPDATE comments SET body = ?, mentions = ?, updated_at = ? WHERE id = ?",
+        text,
+        JSON.stringify(
+          resolveMentions(
+            scene,
+            body.mentions ?? JSON.parse(comment.mentions || "[]"),
+            text,
+          ),
+        ),
         now(),
         comment.id,
       );

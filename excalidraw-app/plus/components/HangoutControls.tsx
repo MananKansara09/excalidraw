@@ -3,7 +3,7 @@ import clsx from "clsx";
 
 import { useAtomValue } from "../../app-jotai";
 import { hangout, hangoutAtom } from "../hangout";
-import { participantsAtom } from "../state";
+import { connectionIdAtom, participantsAtom } from "../state";
 
 const MediaElement = ({
   stream,
@@ -43,26 +43,42 @@ const MediaElement = ({
 export const HangoutButtons = () => {
   const state = useAtomValue(hangoutAtom);
   const participants = useAtomValue(participantsAtom);
+  const me = useAtomValue(connectionIdAtom);
   const inCall = participants.filter((p) => p.inHangout).length;
+  const sharer = participants.find(
+    (p) => p.sharingScreen && p.connectionId !== me,
+  );
 
   if (!state.joined) {
     return (
-      <button
-        className="plus-pill-button"
-        onClick={() => hangout.join()}
-        disabled={state.joining}
-        title={
-          state.error ??
-          "Talk with everyone on this scene, and share your screen"
-        }
-      >
-        <span aria-hidden="true">🎧</span>{" "}
-        {state.joining
-          ? "Joining…"
-          : inCall
-          ? `Join voice (${inCall})`
-          : "Voice"}
-      </button>
+      <>
+        {sharer && (
+          <button
+            className="plus-pill-button primary"
+            onClick={() => hangout.join({ mic: false })}
+            disabled={state.joining}
+            title="Watch the shared screen and listen to the call, with your microphone off"
+          >
+            <span aria-hidden="true">🖥️</span> Watch {sharer.name}'s screen
+          </button>
+        )}
+        <button
+          className="plus-pill-button"
+          onClick={() => hangout.join()}
+          disabled={state.joining}
+          title={
+            state.error ??
+            "Talk with everyone on this scene, and share your screen"
+          }
+        >
+          <span aria-hidden="true">🎧</span>{" "}
+          {state.joining
+            ? "Joining…"
+            : inCall
+            ? `Join voice (${inCall})`
+            : "Voice"}
+        </button>
+      </>
     );
   }
 
@@ -73,12 +89,21 @@ export const HangoutButtons = () => {
       aria-label="Voice hangout"
     >
       <button
-        className={clsx("plus-pill-button", { off: state.muted })}
+        className={clsx("plus-pill-button", {
+          off: state.muted || !state.micOn,
+        })}
         onClick={() => hangout.toggleMute()}
-        aria-pressed={state.muted}
-        title={state.muted ? "Unmute" : "Mute"}
+        aria-pressed={state.muted || !state.micOn}
+        title={
+          state.error ??
+          (!state.micOn
+            ? "Turn your microphone on"
+            : state.muted
+            ? "Unmute"
+            : "Mute")
+        }
       >
-        {state.muted ? "🔇" : "🎙️"}
+        {state.muted || !state.micOn ? "🔇" : "🎙️"}
       </button>
       <button
         className={clsx("plus-pill-button", { on: state.sharingScreen })}

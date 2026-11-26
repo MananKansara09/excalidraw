@@ -9,8 +9,14 @@ import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 import { useAtom, useAtomValue, useSetAtom } from "../../app-jotai";
 import { plusAPI } from "../api";
 import { cloudSceneHash } from "../cloud";
-import { cloudSceneAtom, plusDialogAtom, plusUserAtom } from "../state";
+import {
+  cloudSceneAtom,
+  mentionsUnreadAtom,
+  plusDialogAtom,
+  plusUserAtom,
+} from "../state";
 
+import { MentionsPanel } from "./MentionsPanel";
 import { TeamPanel } from "./TeamPanel";
 import { ErrorText, SmallButton, timeAgo, useAsyncAction } from "./ui";
 
@@ -19,6 +25,7 @@ import type { Folder, PlusFile, SceneSummary, TeamSummary } from "../api";
 type View =
   | { kind: "personal" }
   | { kind: "shared" }
+  | { kind: "mentions" }
   | { kind: "team"; teamId: string; tab: "scenes" | "members" };
 
 const viewTeamId = (view: View) => (view.kind === "team" ? view.teamId : null);
@@ -68,6 +75,7 @@ export const WorkspaceDialog = ({
   const setDialog = useSetAtom(plusDialogAtom);
   const [user] = useAtom(plusUserAtom);
   const cloudScene = useAtomValue(cloudSceneAtom);
+  const unreadMentions = useAtomValue(mentionsUnreadAtom);
 
   const [view, setView] = useState<View>(
     cloudScene?.teamId
@@ -91,6 +99,9 @@ export const WorkspaceDialog = ({
   const load = useCallback(() => {
     const teamId = viewTeamId(view);
     return run(async () => {
+      if (view.kind === "mentions") {
+        return;
+      }
       if (view.kind === "shared") {
         setFolders([]);
         setScenes(
@@ -140,6 +151,8 @@ export const WorkspaceDialog = ({
       ? "My scenes"
       : view.kind === "shared"
       ? "Shared with me"
+      : view.kind === "mentions"
+      ? "Mentions"
       : team?.name ?? "Team";
 
   const switchView = (next: View) => {
@@ -152,7 +165,7 @@ export const WorkspaceDialog = ({
     return null;
   }
 
-  const canCreateHere = view.kind !== "shared";
+  const canCreateHere = view.kind !== "shared" && view.kind !== "mentions";
 
   return (
     <Dialog
@@ -174,6 +187,15 @@ export const WorkspaceDialog = ({
             onClick={() => switchView({ kind: "shared" })}
           >
             Shared with me
+          </button>
+          <button
+            className={clsx({ active: view.kind === "mentions" })}
+            onClick={() => switchView({ kind: "mentions" })}
+          >
+            Mentions
+            {unreadMentions > 0 && (
+              <span className="plus-count">{unreadMentions}</span>
+            )}
           </button>
           <div className="plus-workspace__nav-heading">Teams</div>
           {teams.map((t) => (
@@ -267,7 +289,9 @@ export const WorkspaceDialog = ({
             )}
           </header>
 
-          {view.kind === "team" && view.tab === "members" ? (
+          {view.kind === "mentions" ? (
+            <MentionsPanel user={user} />
+          ) : view.kind === "team" && view.tab === "members" ? (
             <TeamPanel
               teamId={view.teamId}
               user={user}

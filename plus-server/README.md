@@ -8,7 +8,8 @@ A self-hosted backend for the Plus features of the Excalidraw app in this reposi
 - **Share links**: read-only links, edit links and iframe embeds
 - **Teams**: owners, admins and members; invites by email (people without an account join when they sign up)
 - **Live collaboration** on cloud scenes, with presence
-- **Comments**: threads pinned to elements or canvas spots, replies, resolve
+- **Comments**: threads pinned to elements or canvas spots, replies, resolve, `@`-mentions of anyone with access, with a toast and a mentions inbox
+- **Live pointers**: everyone's named cursor, laser and selection, viewers included
 - **Voice hangouts and screen sharing** (WebRTC, signaled by this server)
 - **Presentations**: per-scene slide order (export to PDF/PPTX runs in the app)
 - **AI**: text-to-diagram and wireframe-to-code, 100 requests a day per user on the server's key, or unlimited with a user's own Anthropic API key
@@ -47,7 +48,7 @@ In production, build the app (`yarn build:app`) and start the server: it serves 
 | `PLUS_AI_ANON_DAILY_LIMIT` | `10` | AI requests per IP per day for signed-out visitors |
 | `PLUS_AI_EFFORT` | `medium` | Effort level for `claude-opus-5-5` (`low`, `medium`, `high`) |
 
-The app reads `VITE_APP_PLUS_SERVER_URL` (dev proxy target) and `VITE_APP_PLUS_ICE_SERVERS` (a JSON array of `RTCIceServer`; defaults to a public STUN server, add a TURN server for users behind strict NATs).
+`PLUS_ICE_SERVERS` is a JSON array of `RTCIceServer` for voice and screen sharing (served at `/api/v1/rtc-config`; defaults to a public STUN server). Add a TURN server for users behind strict NATs. The app also reads `VITE_APP_PLUS_SERVER_URL` (dev proxy target) and, as a build-time fallback, `VITE_APP_PLUS_ICE_SERVERS`.
 
 ## REST API
 

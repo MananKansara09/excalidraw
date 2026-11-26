@@ -824,3 +824,109 @@ describe("static files", () => {
     }
   });
 });
+
+describe("mentions", () => {
+  test("lists people with access and stores only valid mentions", async () => {
+    const { api: owner, user: ownerUser } = await signUp(
+      server.base,
+      "mentioner",
+    );
+    const { api: grace, user: graceUser } = await signUp(server.base, "grace");
+    const { user: stranger } = await signUp(server.base, "outsider");
+    const scene = (await owner.post("/api/v1/scenes", { name: "Mentions" }))
+      .json.scene;
+    await owner.post(`/api/v1/scenes/${scene.id}/access`, {
+      email: "grace@example.com",
+      role: "viewer",
+    });
+
+    const people = (await grace.get(`/api/v1/scenes/${scene.id}/people`)).json
+      .people;
+    assert.deepEqual(people.map((p: any) => p.name).sort(), [
+      "grace",
+      "mentioner",
+    ]);
+
+    const comment = (
+      await owner.post(`/api/v1/scenes/${scene.id}/comments`, {
+        body: "@grace can you check this? cc @outsider",
+        mentions: [
+          { userId: graceUser.id },
+          // no access to the scene: dropped
+          { userId: stranger.id },
+          // not in the text: dropped
+          { userId: ownerUser.id },
+        ],
+      })
+    ).json.comment;
+    assert.deepEqual(comment.mentions, [
+      { userId: graceUser.id, name: "grace" },
+    ]);
+
+    // grace's inbox shows it as unread until she marks it seen
+    let inbox = (await grace.get("/api/v1/me/mentions")).json;
+    assert.equal(inbox.unread, 1);
+    assert.equal(inbox.mentions[0].sceneName, "Mentions");
+    assert.equal(inbox.mentions[0].body, comment.body);
+    await grace.post("/api/v1/me/mentions/seen");
+    inbox = (await grace.get("/api/v1/me/mentions")).json;
+    assert.equal(inbox.unread, 0);
+    assert.equal(inbox.mentions.length, 1);
+
+    // editing the text away removes the mention
+    const edited = (
+      await owner.patch(`/api/v1/comments/${comment.id}`, {
+        body: "never mind",
+      })
+    ).json.comment;
+    assert.deepEqual(edited.mentions, []);
+
+    // losing access hides old mentions from the inbox
+    await owner.post(`/api/v1/scenes/${scene.id}/comments`, {
+      body: "@grace again",
+      mentions: [{ userId: graceUser.id }],
+    });
+    await owner.delete(`/api/v1/scenes/${scene.id}/access/${graceUser.id}`);
+    assert.equal(
+      (await grace.get("/api/v1/me/mentions")).json.mentions.length,
+      0,
+    );
+  });
+
+  test("adds the new columns to a database from an earlier version", async () => {
+    const { DatabaseSync } = await import("node:sqlite");
+    const { mkdtempSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const { openDatabase } = await import("../src/db.ts");
+    const file = join(
+      mkdtempSync(join(tmpdir(), "plus-migrate-")),
+      "old.sqlite",
+    );
+    const old = new DatabaseSync(file);
+    old.exec(`CREATE TABLE users (id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
+      password_hash TEXT NOT NULL, ai_key_enc TEXT, created_at INTEGER NOT NULL);
+      CREATE TABLE comments (id TEXT PRIMARY KEY, scene_id TEXT NOT NULL, parent_id TEXT, author_id TEXT NOT NULL,
+      element_id TEXT, x REAL, y REAL, body TEXT NOT NULL, resolved INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+      INSERT INTO comments VALUES ('c1', 's1', NULL, 'u1', NULL, NULL, NULL, 'old', 0, 1, 1);`);
+    old.close();
+    const db = openDatabase(file);
+    const row = db
+      .prepare("SELECT mentions FROM comments WHERE id = 'c1'")
+      .get() as any;
+    assert.equal(row.mentions, "[]");
+    // opening again is a no-op
+    db.close();
+    openDatabase(file).close();
+  });
+});
+
+describe("rtc config", () => {
+  test("serves ICE servers, defaulting to public STUN", async () => {
+    const res = await client(server.base).get("/api/v1/rtc-config");
+    assert.deepEqual(res.json, {
+      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+    });
+  });
+});

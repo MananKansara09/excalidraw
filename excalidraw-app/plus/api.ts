@@ -112,9 +112,19 @@ export type PlusComment = {
   x: number | null;
   y: number | null;
   body: string;
+  mentions: Mention[];
   resolved: boolean;
   createdAt: number;
   updatedAt: number;
+};
+
+export type Mention = { userId: string; name: string };
+
+export type Person = { userId: string; name: string; email: string };
+
+export type MentionInboxItem = PlusComment & {
+  sceneName: string;
+  unread: boolean;
 };
 
 export type ApiKey = {
@@ -367,6 +377,7 @@ export const plusAPI = {
       elementId?: string | null;
       x?: number | null;
       y?: number | null;
+      mentions?: Mention[];
     },
   ) =>
     plusFetch<{ comment: PlusComment }>(`/scenes/${sceneId}/comments`, {
@@ -380,6 +391,13 @@ export const plusAPI = {
     }),
   deleteComment: (id: string) =>
     plusFetch(`/comments/${id}`, { method: "DELETE" }),
+  listPeople: (sceneId: string) =>
+    plusFetch<{ people: Person[] }>(`/scenes/${sceneId}/people`),
+  myMentions: () =>
+    plusFetch<{ unread: number; mentions: MentionInboxItem[] }>("/me/mentions"),
+  markMentionsSeen: () =>
+    plusFetch("/me/mentions/seen", { method: "POST", body: {} }),
+  rtcConfig: () => plusFetch<{ iceServers: RTCIceServer[] }>("/rtc-config"),
 
   // realtime
   signal: (

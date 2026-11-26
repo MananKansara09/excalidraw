@@ -1,4 +1,4 @@
-import { get } from "./db.ts";
+import { all, get } from "./db.ts";
 import { forbidden, notFound, unauthorized } from "./http.ts";
 
 import type { DB } from "./db.ts";
@@ -140,6 +140,35 @@ export const loadSceneForRole = (
     );
   }
   return { scene, role };
+};
+
+export type Person = { userId: string; name: string; email: string };
+
+/**
+ * Everyone with an account who can open the scene: its owner, people it's
+ * shared with, and the members of its team. (Share-link visitors aren't
+ * included: links are anonymous.)
+ */
+export const getScenePeople = (db: DB, scene: SceneRow): Person[] => {
+  const rows = all<{ id: string; name: string; email: string }>(
+    db,
+    `SELECT id, name, email FROM users WHERE id = ?
+     UNION
+     SELECT users.id, users.name, users.email FROM scene_access
+       JOIN users ON users.id = scene_access.user_id WHERE scene_access.scene_id = ?
+     UNION
+     SELECT users.id, users.name, users.email FROM team_members
+       JOIN users ON users.id = team_members.user_id WHERE team_members.team_id = ?
+     ORDER BY name`,
+    scene.owner_id,
+    scene.id,
+    scene.team_id ?? "",
+  );
+  return rows.map((row) => ({
+    userId: row.id,
+    name: row.name,
+    email: row.email,
+  }));
 };
 
 export type FolderRow = {

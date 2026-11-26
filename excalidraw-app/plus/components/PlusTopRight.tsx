@@ -1,9 +1,13 @@
+import { getClientColor } from "@excalidraw/excalidraw/clients";
 import clsx from "clsx";
+
+import type { SocketId } from "@excalidraw/excalidraw/types";
 
 import { useAtomValue, useSetAtom } from "../../app-jotai";
 import {
   cloudSceneAtom,
   cloudStatusAtom,
+  mentionsUnreadAtom,
   participantsAtom,
   plusDialogAtom,
   plusUserAtom,
@@ -75,7 +79,13 @@ const Participants = () => {
           className={clsx("plus-avatar small", {
             speaking: participant.inHangout,
           })}
-          style={{ background: participant.color }}
+          // the same colour the editor gives this person's cursor
+          style={{
+            background: getClientColor(participant.connectionId as SocketId, {
+              id: participant.userId ?? participant.connectionId,
+            }),
+            color: "#1e1e1e",
+          }}
           title={`${participant.name}${
             participant.inHangout ? " (in voice)" : ""
           }${participant.sharingScreen ? " (sharing screen)" : ""}`}
@@ -94,6 +104,7 @@ export const PlusTopRight = () => {
   const user = useAtomValue(plusUserAtom);
   const scene = useAtomValue(cloudSceneAtom);
   const setDialog = useSetAtom(plusDialogAtom);
+  const unreadMentions = useAtomValue(mentionsUnreadAtom);
 
   if (scene?.embed) {
     return null;
@@ -119,9 +130,18 @@ export const PlusTopRight = () => {
           <button
             className="plus-pill-button"
             onClick={() => setDialog({ name: "workspace" })}
-            title="Your scenes, folders and teams"
+            title={
+              unreadMentions
+                ? `${unreadMentions} unread mention${
+                    unreadMentions > 1 ? "s" : ""
+                  }`
+                : "Your scenes, folders and teams"
+            }
           >
             Workspace
+            {unreadMentions > 0 && (
+              <span className="plus-count">{unreadMentions}</span>
+            )}
           </button>
           <button
             className="plus-avatar plus-avatar-button"

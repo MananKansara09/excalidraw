@@ -60,3 +60,12 @@ export const presentationAtom = atom<{
 
 /** Frame order for presenting scenes that aren't in the cloud. */
 export const localPresentationOrderAtom = atom<string[]>([]);
+
+/** Unread @-mentions of the signed-in user, for the Workspace badge. */
+export const mentionsUnreadAtom = atom(0);
+
+/** A comment to show once its scene has opened (from the mentions inbox). */
+export const pendingCommentFocusAtom = atom<{
+  sceneId: string;
+  commentId: string;
+} | null>(null);

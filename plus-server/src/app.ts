@@ -81,6 +81,11 @@ export const createApp = (options: CreateAppOptions) => {
   const router = new Router();
   router.get("/api/health", () => ({ ok: true }));
   router.get("/api/v1", () => API_INDEX);
+  router.get("/api/v1/rtc-config", () => ({
+    iceServers: options.config.iceServers ?? [
+      { urls: "stun:stun.l.google.com:19302" },
+    ],
+  }));
   registerAuthRoutes(router, ctx);
   registerTeamRoutes(router, ctx);
   registerSceneRoutes(router, ctx);

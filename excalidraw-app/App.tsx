@@ -1082,7 +1082,9 @@ const ExcalidrawWrapper = () => {
         onExport={onExport}
         initialData={initialStatePromiseRef.current.promise}
         isCollaborating={isCollaborating}
-        onPointerUpdate={collabAPI?.onPointerUpdate}
+        onPointerUpdate={
+          cloudScene ? cloudSession.onPointerUpdate : collabAPI?.onPointerUpdate
+        }
         UIOptions={{
           canvasActions: {
             toggleTheme: true,

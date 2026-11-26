@@ -132,9 +132,22 @@ CREATE INDEX IF NOT EXISTS idx_comments_scene ON comments(scene_id);
 CREATE INDEX IF NOT EXISTS idx_share_links_scene ON share_links(scene_id);
 `;
 
+/** Adds a column to a table created by an earlier version, if missing. */
+const ensureColumn = (db: DB, table: string, column: string, ddl: string) => {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all() as {
+    name: string;
+  }[];
+  if (!columns.some((c) => c.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`);
+  }
+};
+
 export const openDatabase = (path: string): DB => {
   const db = new DatabaseSync(path);
   db.exec(SCHEMA);
+  // migrations for databases created before these columns existed
+  ensureColumn(db, "comments", "mentions", "TEXT NOT NULL DEFAULT '[]'");
+  ensureColumn(db, "users", "mentions_seen_at", "INTEGER NOT NULL DEFAULT 0");
   return db;
 };
 

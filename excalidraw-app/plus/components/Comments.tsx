@@ -13,6 +13,7 @@ import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 
 import { useAtom, useAtomValue, useSetAtom } from "../../app-jotai";
 import { plusAPI } from "../api";
+import { cloudSession } from "../cloud";
 import { goToSignIn } from "../auth";
 import {
   activeCommentIdAtom,
@@ -30,7 +31,9 @@ import {
   useAsyncAction,
 } from "./ui";
 
-import type { PlusComment } from "../api";
+import { CommentBody, MentionInput, mentionsInText } from "./MentionInput";
+
+import type { Mention, Person, PlusComment } from "../api";
 
 /** Where a thread is pinned: its element's top-right corner, or a point. */
 const getAnchor = (
@@ -75,6 +78,7 @@ const Thread = ({
   canModerate,
   userId,
   active,
+  people,
 }: {
   thread: PlusComment;
   replies: PlusComment[];
@@ -82,8 +86,10 @@ const Thread = ({
   canModerate: boolean;
   userId: string | null;
   active: boolean;
+  people: Person[];
 }) => {
   const [reply, setReply] = useState("");
+  const [replyMentions, setReplyMentions] = useState<Mention[]>([]);
   const { pending, error, run } = useAsyncAction();
   const ref = useRef<HTMLLIElement>(null);
 
@@ -92,6 +98,25 @@ const Thread = ({
       ref.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
     }
   }, [active]);
+
+  const sendReply = async () => {
+    const text = reply.trim();
+    if (!text || pending) {
+      return;
+    }
+    const result = await run(() =>
+      plusAPI.addComment(thread.sceneId, {
+        body: text,
+        parentId: thread.id,
+        mentions: mentionsInText(text, replyMentions),
+      }),
+    );
+    if (result) {
+      cloudSession.upsertComment(result.comment);
+      setReply("");
+      setReplyMentions([]);
+    }
+  };
 
   return (
     <li
@@ -123,7 +148,13 @@ const Thread = ({
               </button>
             )}
           </div>
-          <div className="plus-comment__body">{comment.body}</div>
+          <div className="plus-comment__body">
+            <CommentBody
+              body={comment.body}
+              mentions={comment.mentions}
+              myUserId={userId}
+            />
+          </div>
         </div>
       ))}
       <div className="plus-thread__actions">
@@ -149,27 +180,20 @@ const Thread = ({
       {userId && !thread.resolved && (
         <form
           className="plus-inline-form"
-          onSubmit={async (event) => {
+          onSubmit={(event) => {
             event.preventDefault();
-            if (!reply.trim()) {
-              return;
-            }
-            const done = await run(() =>
-              plusAPI.addComment(thread.sceneId, {
-                body: reply.trim(),
-                parentId: thread.id,
-              }),
-            );
-            if (done) {
-              setReply("");
-            }
+            sendReply();
           }}
         >
-          <input
-            placeholder="Reply"
-            aria-label="Reply"
+          <MentionInput
+            label="Reply"
+            placeholder="Reply (type @ to mention)"
             value={reply}
-            onChange={(event) => setReply(event.target.value)}
+            onChange={setReply}
+            mentions={replyMentions}
+            onMentionsChange={setReplyMentions}
+            people={people}
+            onSubmit={sendReply}
           />
           <SmallButton type="submit" disabled={pending || !reply.trim()}>
             Reply
@@ -190,8 +214,31 @@ export const CommentsPanel = ({ api }: { api: ExcalidrawImperativeAPI }) => {
   const setDialog = useSetAtom(plusDialogAtom);
   const { selectedElementIds } = useUIAppState();
   const [body, setBody] = useState("");
+  const [mentions, setMentions] = useState<Mention[]>([]);
+  const [people, setPeople] = useState<Person[]>([]);
   const [showResolved, setShowResolved] = useState(false);
   const { pending, error, run } = useAsyncAction();
+
+  // who can be @-mentioned: everyone with access to the scene but you
+  const sceneId = scene?.id;
+  useEffect(() => {
+    if (!sceneId || !user) {
+      setPeople([]);
+      return;
+    }
+    let cancelled = false;
+    plusAPI
+      .listPeople(sceneId)
+      .then(({ people }) => {
+        if (!cancelled) {
+          setPeople(people.filter((person) => person.userId !== user.id));
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [sceneId, user]);
 
   const threads = useMemo(() => {
     const replies = new Map<string, PlusComment[]>();
@@ -229,6 +276,36 @@ export const CommentsPanel = ({ api }: { api: ExcalidrawImperativeAPI }) => {
   const selectedId = Object.keys(selectedElementIds).find(
     (id) => selectedElementIds[id],
   );
+
+  const postComment = async () => {
+    const text = body.trim();
+    if (!text || pending) {
+      return;
+    }
+    const appState = api.getAppState();
+    const center = viewportCoordsToSceneCoords(
+      {
+        clientX: appState.offsetLeft + appState.width / 2,
+        clientY: appState.offsetTop + appState.height / 2,
+      },
+      appState,
+    );
+    const result = await run(() =>
+      plusAPI.addComment(scene.id, {
+        body: text,
+        elementId: selectedId ?? null,
+        x: selectedId ? null : center.x,
+        y: selectedId ? null : center.y,
+        mentions: mentionsInText(text, mentions),
+      }),
+    );
+    if (result) {
+      // shown right away; the live update for everyone else is a no-op here
+      cloudSession.upsertComment(result.comment);
+      setBody("");
+      setMentions([]);
+    }
+  };
   const canModerate = scene.role === "owner" || scene.role === "editor";
   const resolvedCount = comments.filter(
     (c) => !c.parentId && c.resolved,
@@ -239,51 +316,34 @@ export const CommentsPanel = ({ api }: { api: ExcalidrawImperativeAPI }) => {
       {user ? (
         <form
           className="plus-comments__compose"
-          onSubmit={async (event) => {
+          onSubmit={(event) => {
             event.preventDefault();
-            if (!body.trim()) {
-              return;
-            }
-            const appState = api.getAppState();
-            const center = viewportCoordsToSceneCoords(
-              {
-                clientX: appState.offsetLeft + appState.width / 2,
-                clientY: appState.offsetTop + appState.height / 2,
-              },
-              appState,
-            );
-            const done = await run(() =>
-              plusAPI.addComment(scene.id, {
-                body: body.trim(),
-                elementId: selectedId ?? null,
-                x: selectedId ? null : center.x,
-                y: selectedId ? null : center.y,
-              }),
-            );
-            if (done) {
-              setBody("");
-            }
+            postComment();
           }}
         >
-          <textarea
-            rows={3}
+          <MentionInput
+            multiline
+            label="New comment"
             placeholder={
               selectedId
-                ? "Comment on the selected element"
-                : "Comment on this spot (select an element to pin it there)"
+                ? "Comment on the selected element. Type @ to mention someone"
+                : "Comment on this spot (select an element to pin it there). Type @ to mention someone"
             }
-            aria-label="New comment"
             value={body}
-            onChange={(event) => setBody(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-                event.currentTarget.form?.requestSubmit();
-              }
-            }}
+            onChange={setBody}
+            mentions={mentions}
+            onMentionsChange={setMentions}
+            people={people}
+            onSubmit={postComment}
           />
-          <SmallButton type="submit" disabled={pending || !body.trim()}>
-            Comment
-          </SmallButton>
+          <div className="plus-comments__compose-actions">
+            <span className="plus-muted">
+              Enter to post · Shift+Enter for a new line
+            </span>
+            <SmallButton type="submit" disabled={pending || !body.trim()}>
+              Comment
+            </SmallButton>
+          </div>
         </form>
       ) : (
         <div className="plus-sidebar-empty">
@@ -317,6 +377,7 @@ export const CommentsPanel = ({ api }: { api: ExcalidrawImperativeAPI }) => {
               canModerate={canModerate}
               userId={user?.id ?? null}
               active={thread.id === activeId}
+              people={people}
             />
           ))}
         </ul>

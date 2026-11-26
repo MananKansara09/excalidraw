@@ -1,5 +1,6 @@
 import { atom, appJotaiStore } from "../app-jotai";
 
+import { plusAPI } from "./api";
 import { cloudSession } from "./cloud";
 import { connectionIdAtom, participantsAtom } from "./state";
 
@@ -15,6 +16,8 @@ import type { SignalMessage } from "./cloud";
 export type HangoutState = {
   joined: boolean;
   joining: boolean;
+  /** Joined without a microphone (to watch a screen share or listen). */
+  micOn: boolean;
   muted: boolean;
   sharingScreen: boolean;
   error: string | null;
@@ -30,6 +33,7 @@ export type HangoutState = {
 const initialState: HangoutState = {
   joined: false,
   joining: false,
+  micOn: false,
   muted: false,
   sharingScreen: false,
   error: null,
@@ -39,7 +43,23 @@ const initialState: HangoutState = {
 
 export const hangoutAtom = atom<HangoutState>(initialState);
 
-const getIceServers = (): RTCIceServer[] => {
+const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
+  { urls: "stun:stun.l.google.com:19302" },
+];
+
+/**
+ * ICE servers: the server's PLUS_ICE_SERVERS (so a TURN server can be added
+ * without rebuilding the app), else the build-time setting, else public STUN.
+ */
+const loadIceServers = async (): Promise<RTCIceServer[]> => {
+  try {
+    const { iceServers } = await plusAPI.rtcConfig();
+    if (Array.isArray(iceServers) && iceServers.length) {
+      return iceServers;
+    }
+  } catch {
+    // older server without the endpoint
+  }
   try {
     const configured = import.meta.env.VITE_APP_PLUS_ICE_SERVERS;
     if (configured) {
@@ -48,8 +68,18 @@ const getIceServers = (): RTCIceServer[] => {
   } catch (error) {
     console.warn("Invalid VITE_APP_PLUS_ICE_SERVERS", error);
   }
-  return [{ urls: "stun:stun.l.google.com:19302" }];
+  return DEFAULT_ICE_SERVERS;
 };
+
+const getMicrophone = () =>
+  navigator.mediaDevices.getUserMedia({
+    audio: { echoCancellation: true, noiseSuppression: true },
+  });
+
+const micErrorMessage = (error: any) =>
+  error?.name === "NotAllowedError"
+    ? "Microphone access was blocked. Allow it in your browser to talk."
+    : "Couldn't start your microphone.";
 
 type Peer = {
   id: string;
@@ -65,6 +95,7 @@ class Hangout {
   private microphone: MediaStream | null = null;
   private screen: MediaStream | null = null;
   private unsubscribe: (() => void) | null = null;
+  private iceServers: RTCIceServer[] = DEFAULT_ICE_SERVERS;
 
   private set(patch: Partial<HangoutState>) {
     appJotaiStore.set(hangoutAtom, {
@@ -93,27 +124,26 @@ class Hangout {
     return appJotaiStore.get(hangoutAtom).joined;
   }
 
-  async join() {
+  /**
+   * Joins the call. Without the microphone (`{ mic: false }`) you watch
+   * screen shares and listen, and can turn the mic on later.
+   */
+  async join({ mic = true }: { mic?: boolean } = {}) {
     if (this.isJoined() || appJotaiStore.get(hangoutAtom).joining) {
       return;
     }
     this.set({ joining: true, error: null });
-    try {
-      this.microphone = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true },
-      });
-    } catch (error: any) {
-      this.set({
-        joining: false,
-        error:
-          error?.name === "NotAllowedError"
-            ? "Microphone access was blocked. Allow it in your browser to join."
-            : "Couldn't start your microphone.",
-      });
-      return;
+    if (mic) {
+      try {
+        this.microphone = await getMicrophone();
+      } catch (error: any) {
+        this.set({ joining: false, error: micErrorMessage(error) });
+        return;
+      }
     }
+    this.iceServers = await loadIceServers();
     this.unsubscribe = cloudSession.onSignal(this.onSignal);
-    this.set({ joined: true, joining: false, muted: false });
+    this.set({ joined: true, joining: false, micOn: mic, muted: false });
     try {
       await cloudSession.signal("hangout-join");
     } catch (error) {
@@ -148,7 +178,29 @@ class Hangout {
     cloudSession.signal("hangout-leave").catch(() => {});
   }
 
+  /** Turns the microphone on after joining to listen. */
+  async enableMic() {
+    if (!this.isJoined() || this.microphone) {
+      return;
+    }
+    try {
+      this.microphone = await getMicrophone();
+    } catch (error: any) {
+      this.set({ error: micErrorMessage(error) });
+      return;
+    }
+    const [track] = this.microphone.getAudioTracks();
+    for (const peer of this.peers.values()) {
+      peer.pc.addTrack(track, this.microphone);
+    }
+    this.set({ micOn: true, muted: false, error: null });
+  }
+
   toggleMute() {
+    if (!this.microphone) {
+      this.enableMic();
+      return;
+    }
     const muted = !appJotaiStore.get(hangoutAtom).muted;
     this.microphone?.getAudioTracks().forEach((track) => {
       track.enabled = !muted;
@@ -201,7 +253,7 @@ class Hangout {
       return existing;
     }
     const me = appJotaiStore.get(connectionIdAtom) ?? "";
-    const pc = new RTCPeerConnection({ iceServers: getIceServers() });
+    const pc = new RTCPeerConnection({ iceServers: this.iceServers });
     const peer: Peer = {
       id: peerId,
       pc,
@@ -254,14 +306,21 @@ class Hangout {
       }
     };
 
-    this.microphone
-      ?.getTracks()
-      .forEach((track) => pc.addTrack(track, this.microphone!));
+    if (this.microphone) {
+      this.microphone
+        .getTracks()
+        .forEach((track) => pc.addTrack(track, this.microphone!));
+    } else {
+      // nothing to send yet, but we still want to hear and see the others
+      pc.addTransceiver("audio", { direction: "recvonly" });
+    }
     if (this.screen) {
       peer.screenSender = pc.addTrack(
         this.screen.getVideoTracks()[0],
         this.screen,
       );
+    } else {
+      pc.addTransceiver("video", { direction: "recvonly" });
     }
     return peer;
   }

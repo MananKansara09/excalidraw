@@ -84,13 +84,14 @@ Use two browsers, or one normal and one private window:
 4. **Sharing**: click **Share → Create edit link**, open it in the second window. Draw in one window: the change appears in the other within a second, and each window shows the other person's avatar.
 5. **Read-only link and embed**: **Share → Create read-only link**. The link opens view-only. Paste the embed code into an HTML file to test the iframe.
 6. **Access management**: sign up a second account, then **Share → People**, add it by email as **Can view**; in that account the scene appears under **Shared with me** and can't be edited.
-7. **Comments**: open the sidebar (top-right panel icon) → comments tab, select a shape, write a comment. A pin appears on the shape, and the other window sees the comment live.
-8. **Presentation**: draw two frames (press `F`), sidebar → presentation tab → **Present**. Arrow keys change slides, `L` is the laser, `Esc` exits.
-9. **Export**: **Export PDF / PPTX** in the same tab; open both files.
-10. **Voice and screen**: click **Voice** in both windows (allow the microphone), talk, then click 🖥️ to share a screen.
-11. **Teams**: Workspace → **+ New team**, invite an email. Signing up with that email joins the team automatically.
-12. **AI**: Account → paste an Anthropic key (or rely on the server key), then use **Text to diagram** from the toolbar's extra tools.
-13. **API / MCP**: Account → **Create API key**, then:
+7. **Comments and mentions**: open the sidebar (top-right panel icon) → comments tab, select a shape, type a comment and `@` plus part of the other account's name or email, pick them from the list, press **Enter**. The comment appears at once with a pin on the shape. The other account sees it live, gets a "mentioned you" toast and a count on **Workspace**; **Workspace → Mentions** lists it and opens the thread.
+8. **Live pointers**: move the mouse in each window: the other shows a named cursor, and what each person selects is outlined for the other, including for a **Can view** account. Press `L` for the laser: others see its trail.
+9. **Presentation**: draw two frames (press `F`), sidebar → presentation tab → **Present**. Arrow keys change slides, `L` is the laser, `Esc` exits.
+10. **Export**: **Export PDF / PPTX** in the same tab; open both files.
+11. **Voice and screen**: click **Voice** in one window (allow the microphone) and 🖥️ to share a screen. The other window, without joining, gets "… is sharing their screen" with **Watch**: it shows the screen and the call audio with the microphone off; the 🔇 button turns the mic on.
+12. **Teams**: Workspace → **+ New team**, invite an email. Signing up with that email joins the team automatically.
+13. **AI**: Account → paste an Anthropic key (or rely on the server key), then use **Text to diagram** from the toolbar's extra tools.
+14. **API / MCP**: Account → **Create API key**, then:
 
     ```bash
     curl -H "Authorization: Bearer exk_..." https://draw.example.com/api/v1/scenes?scope=all
@@ -209,7 +210,7 @@ Run a single instance: realtime state (presence, voice signaling) lives in the s
 | Signed in, but reloading signs you out | The site isn't on HTTPS while `PLUS_SECURE_COOKIES=true`. Use the HTTPS URL. |
 | Share links point at the wrong domain | `DOMAIN` in `.env.plus` doesn't match the URL you use. |
 | **Voice** asks nothing / mic is blocked | The page isn't on HTTPS, or the browser blocked the microphone for the site. |
-| Voice connects for some people but not others | Strict NATs or corporate networks need a TURN server. Set `VITE_APP_PLUS_ICE_SERVERS` in `.env.production` to a JSON list such as `[{"urls":"stun:stun.l.google.com:19302"},{"urls":"turn:turn.example.com:3478","username":"u","credential":"p"}]` and rebuild. |
+| Voice or a shared screen connects for some people but not others | Strict NATs or corporate networks need a TURN server (e.g. coturn, or a hosted one). Set `PLUS_ICE_SERVERS` in `.env.plus` to a JSON list such as `[{"urls":"stun:stun.l.google.com:19302"},{"urls":"turn:turn.example.com:3478","username":"u","credential":"p"}]` and restart the container (no rebuild needed). |
 | AI says it isn't set up | No `ANTHROPIC_API_KEY` in `.env.plus` and the user hasn't added their own key. |
 | `429 Too many failed sign-ins` | 10 failed sign-ins for one email from one IP within 15 minutes; wait, or restart the `plus` service to reset. |
 | Build is killed | Not enough memory; add swap or build elsewhere. |

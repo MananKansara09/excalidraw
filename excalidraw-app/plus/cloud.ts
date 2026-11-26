@@ -5,6 +5,7 @@ import {
   restoreElements,
 } from "@excalidraw/excalidraw";
 import { debounce } from "@excalidraw/common";
+import throttle from "lodash.throttle";
 
 import type {
   ExcalidrawElement,
@@ -15,7 +16,10 @@ import type {
   AppState,
   BinaryFileData,
   BinaryFiles,
+  Collaborator,
+  CollaboratorPointer,
   ExcalidrawImperativeAPI,
+  SocketId,
 } from "@excalidraw/excalidraw/types";
 
 import { appJotaiStore } from "../app-jotai";
@@ -27,6 +31,7 @@ import {
   cloudStatusAtom,
   commentsAtom,
   connectionIdAtom,
+  mentionsUnreadAtom,
   participantsAtom,
   plusUserAtom,
 } from "./state";
@@ -59,6 +64,16 @@ export const getShareURL = (token: string, embed = false) =>
   `${window.location.origin}/#share=${token}${embed ? "&embed=1" : ""}`;
 
 export type SignalMessage = { type: string; from: string; data: any };
+
+/** What each client broadcasts about its pointer and selection. */
+type PointerPayload = {
+  pointer: { x: number; y: number; tool: "pointer" | "laser" } | null;
+  button: "up" | "down";
+  selectedElementIds: AppState["selectedElementIds"];
+};
+
+/** Interval between pointer broadcasts. */
+const POINTER_INTERVAL_MS = 60;
 type SignalListener = (message: SignalMessage) => void;
 
 const toBinaryFiles = (files: Record<string, PlusFile> | undefined) =>
@@ -89,6 +104,14 @@ class CloudSession {
   private needsAnotherFlush = false;
   private signalListeners = new Set<SignalListener>();
   private connectedOnce = false;
+  /** Other people's cursors and selections, by connection id. */
+  private collaborators = new Map<SocketId, Collaborator>();
+  private lastPointer: PointerPayload = {
+    pointer: null,
+    button: "up",
+    selectedElementIds: {},
+  };
+  private lastSelectionKey = "";
 
   get sceneId() {
     return this.scene?.id ?? null;
@@ -179,6 +202,9 @@ class CloudSession {
     appJotaiStore.set(cloudSceneAtom, null);
     appJotaiStore.set(participantsAtom, []);
     appJotaiStore.set(connectionIdAtom, null);
+    this.sendPointer.cancel();
+    this.collaborators.clear();
+    this.lastSelectionKey = "";
     appJotaiStore.set(commentsAtom, []);
     appJotaiStore.set(cloudStatusAtom, { state: "idle" });
     if (resumeLocalSave) {
@@ -192,7 +218,23 @@ class CloudSession {
     elements: readonly OrderedExcalidrawElement[],
     appState: AppState,
   ) {
-    if (!this.scene || !this.canEdit()) {
+    if (!this.scene) {
+      return;
+    }
+    // everyone, viewers included, shares what they have selected
+    const selectionKey = Object.keys(appState.selectedElementIds)
+      .filter((id) => appState.selectedElementIds[id])
+      .sort()
+      .join(",");
+    if (selectionKey !== this.lastSelectionKey) {
+      this.lastSelectionKey = selectionKey;
+      this.lastPointer = {
+        ...this.lastPointer,
+        selectedElementIds: appState.selectedElementIds,
+      };
+      this.sendPointer();
+    }
+    if (!this.canEdit()) {
       return;
     }
     const dirty =
@@ -392,6 +434,9 @@ class CloudSession {
     });
     on("presence", (data: { participants: Participant[] }) => {
       appJotaiStore.set(participantsAtom, data.participants);
+      this.syncCollaboratorsWithPresence(data.participants);
+      // newcomers learn where everyone's pointer and selection are
+      this.sendPointer();
     });
     on("scene-update", (data) => {
       this.applyRemoteElements(data.elements);
@@ -434,16 +479,14 @@ class CloudSession {
           ),
         );
       } else {
-        const comment = data.comment as PlusComment;
-        appJotaiStore.set(
-          commentsAtom,
-          comments.some((c) => c.id === comment.id)
-            ? comments.map((c) => (c.id === comment.id ? comment : c))
-            : [...comments, comment],
-        );
+        this.upsertComment(data.comment as PlusComment);
       }
     });
     on("signal", (data: SignalMessage) => {
+      if (data.type === "pointer") {
+        this.onRemotePointer(data.from, data.data);
+        return;
+      }
       this.signalListeners.forEach((listener) => listener(data));
     });
     on("scene-deleted", () => {
@@ -460,7 +503,127 @@ class CloudSession {
     };
   }
 
+  // live pointers ----------------------------------------------------------------
+
+  /** The editor's `onPointerUpdate`: shares where this user's pointer is. */
+  onPointerUpdate = (payload: {
+    pointer: { x: number; y: number; tool: "pointer" | "laser" };
+    button: "down" | "up";
+    pointersMap: Map<number, unknown>;
+  }) => {
+    // multi-touch gestures (pinch zoom) aren't a pointer
+    if (!this.scene || payload.pointersMap.size > 1) {
+      return;
+    }
+    this.lastPointer = {
+      ...this.lastPointer,
+      pointer: payload.pointer,
+      button: payload.button,
+    };
+    this.sendPointer();
+  };
+
+  private sendPointer = throttle(
+    () => {
+      if (this.scene && appJotaiStore.get(connectionIdAtom)) {
+        this.signal("pointer", this.lastPointer).catch(() => {
+          // pointers are best-effort; the next move sends a fresh one
+        });
+      }
+    },
+    POINTER_INTERVAL_MS,
+    { leading: true, trailing: true },
+  );
+
+  private renderCollaborators() {
+    this.api?.updateScene({ collaborators: new Map(this.collaborators) });
+  }
+
+  private onRemotePointer(from: string, data: PointerPayload) {
+    const participant = appJotaiStore
+      .get(participantsAtom)
+      .find((p) => p.connectionId === from);
+    const id = from as SocketId;
+    const pointer: CollaboratorPointer | undefined = data?.pointer
+      ? {
+          x: data.pointer.x,
+          y: data.pointer.y,
+          tool: data.pointer.tool === "laser" ? "laser" : "pointer",
+        }
+      : undefined;
+    this.collaborators.set(id, {
+      ...this.collaborators.get(id),
+      id: participant?.userId ?? from,
+      socketId: id,
+      username: participant?.name ?? "Guest",
+      pointer,
+      button: data?.button === "down" ? "down" : "up",
+      selectedElementIds: data?.selectedElementIds ?? {},
+      isInCall: participant?.inHangout,
+    });
+    this.renderCollaborators();
+  }
+
+  /** Drops the cursors of people who left, refreshes names and call state. */
+  private syncCollaboratorsWithPresence(participants: Participant[]) {
+    const byId = new Map(participants.map((p) => [p.connectionId, p]));
+    let changed = false;
+    for (const [id, collaborator] of this.collaborators) {
+      const participant = byId.get(id);
+      if (!participant) {
+        this.collaborators.delete(id);
+        changed = true;
+      } else if (
+        collaborator.username !== participant.name ||
+        collaborator.isInCall !== participant.inHangout
+      ) {
+        this.collaborators.set(id, {
+          ...collaborator,
+          username: participant.name,
+          isInCall: participant.inHangout,
+        });
+        changed = true;
+      }
+    }
+    if (changed) {
+      this.renderCollaborators();
+    }
+  }
+
   // comments -------------------------------------------------------------------
+
+  /** Adds or replaces a comment; tells the user when it mentions them. */
+  upsertComment(comment: PlusComment) {
+    const comments = appJotaiStore.get(commentsAtom);
+    const isNew = !comments.some((c) => c.id === comment.id);
+    appJotaiStore.set(
+      commentsAtom,
+      isNew
+        ? [...comments, comment]
+        : comments.map((c) => (c.id === comment.id ? comment : c)),
+    );
+    const me = appJotaiStore.get(plusUserAtom);
+    if (
+      isNew &&
+      me &&
+      comment.author.id !== me.id &&
+      comment.mentions?.some((mention) => mention.userId === me.id)
+    ) {
+      appJotaiStore.set(
+        mentionsUnreadAtom,
+        appJotaiStore.get(mentionsUnreadAtom) + 1,
+      );
+      this.api?.setToast({
+        message: `${comment.author.name} mentioned you: “${
+          comment.body.length > 80
+            ? `${comment.body.slice(0, 80)}…`
+            : comment.body
+        }”`,
+        duration: 8000,
+        closable: true,
+      });
+    }
+  }
 
   async loadComments() {
     const scene = this.scene;
