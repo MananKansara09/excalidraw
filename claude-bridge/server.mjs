@@ -442,6 +442,12 @@ const handleChat = async (req, res, user) => {
         ) {
           emit("text", { delta: ev.delta.text });
         } else if (
+          ev.type === "content_block_delta" &&
+          ev.delta.type === "thinking_delta" &&
+          !msg.parent_tool_use_id
+        ) {
+          emit("thinking", { delta: ev.delta.thinking });
+        } else if (
           ev.type === "content_block_start" &&
           ev.content_block.type === "tool_use"
         ) {

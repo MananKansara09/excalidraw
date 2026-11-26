@@ -12,6 +12,7 @@ export type SceneSummary = {
 type Handlers = {
   onSession: (sessionId: string) => void;
   onText: (delta: string) => void;
+  onThinking?: (delta: string) => void;
   onTool: (name: string) => void;
   onOps: (op: BridgeOp) => void;
   onError: (message: string, code?: string) => void;
@@ -136,6 +137,8 @@ export const streamChat = async (
         return handlers.onSession(data.sessionId);
       case "text":
         return handlers.onText(data.delta);
+      case "thinking":
+        return handlers.onThinking?.(data.delta);
       case "tool":
         return handlers.onTool(data.name);
       case "ops":

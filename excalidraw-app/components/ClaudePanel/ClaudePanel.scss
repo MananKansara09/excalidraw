@@ -1,95 +1,305 @@
-.claude-fab,
-.claude-panel {
-  --cl-bg: #ffffff;
-  --cl-surface: #f4f3ff;
-  --cl-border: #e4e2f5;
-  --cl-text: #1b1b1f;
-  --cl-muted: #6b6a7a;
-  --cl-accent: #6965db;
-  --cl-accent-2: #a78bfa;
-  --cl-user: linear-gradient(135deg, #6965db, #8b5cf6);
+// Claude chat: a right-side panel plus a one-line bar on the canvas, styled
+// after the Claude Code interface (warm neutrals, coral accent, light + dark).
+
+.claude-root {
+  --cl-bg: #faf9f5;
+  --cl-surface: #f0eee6;
+  --cl-raised: #ffffff;
+  --cl-border: #e3e0d5;
+  --cl-text: #29261e;
+  --cl-muted: #77746b;
+  --cl-accent: #d97757;
+  --cl-accent-text: #ffffff;
+  --cl-error: #b42318;
+  --cl-error-bg: rgba(217, 45, 32, 0.08);
+  --cl-shadow: 0 8px 28px rgba(41, 38, 30, 0.16);
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: var(--cl-text);
 
   &.theme-dark {
-    --cl-bg: #17171c;
-    --cl-surface: #22222b;
-    --cl-border: #33333f;
-    --cl-text: #ececf3;
-    --cl-muted: #9d9db0;
-    --cl-accent: #a5a2ff;
-    --cl-accent-2: #c4b5fd;
+    --cl-bg: #262624;
+    --cl-surface: #30302e;
+    --cl-raised: #1f1e1d;
+    --cl-border: #41403c;
+    --cl-text: #f5f4ee;
+    --cl-muted: #a3a099;
+    --cl-error: #ff8a80;
+    --cl-error-bg: rgba(255, 99, 88, 0.12);
+    --cl-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
   }
 }
+
+// shared bits -----------------------------------------------------------------
+
+.claude-avatar {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  color: var(--cl-accent-text);
+  background: var(--cl-accent);
+  &.lg {
+    width: 30px;
+    height: 30px;
+  }
+}
+
+.claude-dot {
+  flex: none;
+  font-size: 9px;
+  line-height: 1.9;
+  color: var(--cl-muted);
+  &.ok {
+    color: #3fa66b;
+  }
+}
+
+.claude-spinner {
+  display: inline-block;
+  flex: none;
+  width: 1.1em;
+  text-align: center;
+  color: var(--cl-accent);
+  font-size: 15px;
+  line-height: 1.3;
+}
+
+// moving highlight across "Thinking…" like Claude Code
+.claude-shimmer {
+  background: linear-gradient(
+      100deg,
+      var(--cl-muted) 35%,
+      var(--cl-accent) 50%,
+      var(--cl-muted) 65%
+    )
+    0 0 / 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: claude-shimmer 1.8s linear infinite;
+}
+@keyframes claude-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+// corner icon -----------------------------------------------------------------
 
 .claude-fab {
   position: absolute;
   right: 16px;
-  bottom: 64px;
+  bottom: 16px;
   z-index: 5;
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border: 0;
+  border-radius: 50%;
+  color: var(--cl-accent-text);
+  background: var(--cl-accent);
+  box-shadow: var(--cl-shadow);
+  cursor: pointer;
+  animation: claude-pop 0.25s ease;
+  transition: transform 0.15s ease;
+  svg {
+    transition: transform 0.4s ease;
+  }
+  &:hover {
+    transform: scale(1.07);
+    svg {
+      transform: rotate(45deg);
+    }
+  }
+}
+
+@keyframes claude-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+}
+
+// one-line bar on the canvas --------------------------------------------------
+
+.claude-bar {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  z-index: 4;
+  width: min(560px, calc(100% - 200px));
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: left 0.25s ease, width 0.25s ease;
+
+  // keep clear of the docked panel
+  &.panel-open {
+    left: calc((100% - 408px) / 2);
+    width: min(560px, calc(100% - 408px - 220px));
+    &.wide {
+      left: calc((100% - min(600px, 50vw) - 8px) / 2);
+      width: min(560px, calc(100% - min(600px, 50vw) - 220px));
+    }
+  }
+}
+
+.claude-bar-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 12px;
+  border: 1px solid var(--cl-border);
+  border-radius: 12px;
+  background: var(--cl-bg);
+  box-shadow: var(--cl-shadow);
+  cursor: pointer;
+  animation: claude-rise 0.2s ease;
+  &:hover {
+    border-color: var(--cl-accent);
+  }
+}
+
+@keyframes claude-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+.claude-bar-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  &.user {
+    color: var(--cl-muted);
+  }
+  &.error .claude-bar-text {
+    color: var(--cl-error);
+  }
+  .claude-dot {
+    line-height: 1.5;
+  }
+}
+.claude-bar-prompt {
+  flex: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--cl-accent);
+}
+// the single-line guarantee
+.claude-bar-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+// the editor styles bare inputs globally; keep ours borderless
+.claude-root .claude-bar-input input,
+.claude-root .claude-composer textarea {
+  border: 0;
+  outline: none;
+  box-shadow: none;
+  background: transparent;
+  &:focus {
+    border: 0;
+    outline: none;
+    box-shadow: none;
+  }
+}
+
+.claude-bar-input {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 16px 10px 12px;
-  border: 0;
-  border-radius: 999px;
-  color: #fff;
-  font-weight: 600;
-  font-size: 14px;
-  cursor: pointer;
-  background: linear-gradient(135deg, #6965db, #8b5cf6 55%, #ec4899);
-  box-shadow: 0 6px 20px rgba(105, 101, 219, 0.45);
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
-
-  &:hover {
-    transform: translateY(-2px) scale(1.03);
-    box-shadow: 0 10px 28px rgba(105, 101, 219, 0.55);
+  padding: 6px 6px 6px 8px;
+  border: 1px solid var(--cl-border);
+  border-radius: 14px;
+  background: var(--cl-bg);
+  box-shadow: var(--cl-shadow);
+  transition: border-color 0.15s, box-shadow 0.15s;
+  &:focus-within {
+    border-color: var(--cl-accent);
+    box-shadow: var(--cl-shadow), 0 0 0 3px rgba(217, 119, 87, 0.22);
+  }
+  input {
+    flex: 1;
+    min-width: 0;
+    height: 28px;
+    border: 0;
+    outline: none;
+    font: inherit;
+    font-size: 14px;
+    color: var(--cl-text);
+    background: transparent;
+    &::placeholder {
+      color: var(--cl-muted);
+    }
   }
 }
+
+.claude-send {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 9px;
+  color: var(--cl-accent-text);
+  background: var(--cl-accent);
+  cursor: pointer;
+  transition: transform 0.12s, opacity 0.12s;
+  &:hover:not(:disabled) {
+    transform: scale(1.06);
+  }
+  &:disabled {
+    opacity: 0.35;
+    cursor: default;
+  }
+  &.stop {
+    background: var(--cl-text);
+    color: var(--cl-bg);
+  }
+}
+
+// right-hand chat panel -------------------------------------------------------
 
 .claude-panel {
   position: absolute;
   z-index: 5;
+  top: 0;
+  right: 0;
+  bottom: 0;
   display: flex;
   flex-direction: column;
+  width: min(400px, 100%);
   color: var(--cl-text);
   background: var(--cl-bg);
-  border: 1px solid var(--cl-border);
-  box-shadow: 0 12px 40px rgba(20, 20, 50, 0.22);
-  overflow: hidden;
-  transition: width 0.25s ease, height 0.25s ease;
-  animation: claude-in 0.22s ease;
-
-  // right dock: floating card ("small") or full-height column ("large")
-  &.dock-right {
-    right: 12px;
-    top: 12px;
-    bottom: 12px;
-    border-radius: 16px;
-    &.size-small {
-      width: 340px;
-    }
-    &.size-large {
-      width: min(560px, 55vw);
-    }
-  }
-  &.dock-bottom {
-    left: 12px;
-    right: 12px;
-    bottom: 12px;
-    border-radius: 16px;
-    &.size-small {
-      height: 260px;
-    }
-    &.size-large {
-      height: min(55vh, 520px);
-    }
+  border-left: 1px solid var(--cl-border);
+  box-shadow: var(--cl-shadow);
+  animation: claude-slide-in 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: width 0.25s ease;
+  &.wide {
+    width: min(600px, 50vw);
   }
 }
 
-@keyframes claude-in {
+@keyframes claude-slide-in {
   from {
     opacity: 0;
-    transform: translateY(10px) scale(0.98);
+    transform: translateX(32px);
   }
 }
 
@@ -99,29 +309,24 @@
   justify-content: space-between;
   padding: 10px 12px;
   border-bottom: 1px solid var(--cl-border);
-  background: linear-gradient(180deg, var(--cl-surface), var(--cl-bg));
 
   .claude-title {
     display: flex;
     align-items: center;
     gap: 10px;
+    min-width: 0;
     strong {
       display: block;
       font-size: 14px;
-      line-height: 1.1;
+      line-height: 1.2;
     }
   }
-  .claude-logo {
-    display: grid;
-    place-items: center;
-    width: 30px;
-    height: 30px;
-    border-radius: 9px;
-    color: #fff;
-    background: linear-gradient(135deg, #6965db, #ec4899);
-  }
   .claude-status {
+    display: block;
+    overflow: hidden;
     font-size: 11px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
     color: var(--cl-muted);
     &::before {
       content: "";
@@ -130,13 +335,13 @@
       height: 6px;
       margin-right: 5px;
       border-radius: 50%;
-      background: #f59e0b;
+      background: #e0a030;
     }
     &.up::before {
-      background: #22c55e;
+      background: #3fa66b;
     }
     &.down::before {
-      background: #ef4444;
+      background: #d92d20;
     }
   }
 }
@@ -169,18 +374,102 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 14px 12px;
+  padding: 16px 14px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
+  user-select: text;
+}
+
+.claude-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: claude-rise 0.2s ease;
+  font-size: 14px;
+  line-height: 1.55;
+
+  // the user's prompt, boxed like Claude Code's input echo
+  &.user .claude-user-text {
+    padding: 8px 12px;
+    border: 1px solid var(--cl-border);
+    border-radius: 10px;
+    background: var(--cl-surface);
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  &.error .claude-reply-text {
+    color: var(--cl-error);
+  }
+}
+
+.claude-reply {
+  display: flex;
+  gap: 8px;
+  .claude-reply-text {
+    flex: 1;
+    min-width: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+}
+
+.claude-tool {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--cl-muted);
+  .claude-spinner,
+  .claude-dot {
+    align-self: center;
+  }
+}
+
+.claude-thinking {
+  font-size: 13px;
+  color: var(--cl-muted);
+  .claude-thinking-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0;
+    border: 0;
+    font: inherit;
+    color: inherit;
+    background: none;
+    cursor: pointer;
+    &:hover {
+      color: var(--cl-text);
+    }
+  }
+  .claude-caret {
+    display: inline-block;
+    transition: transform 0.15s;
+    &.open {
+      transform: rotate(90deg);
+    }
+  }
+  .claude-thinking-body {
+    max-height: 220px;
+    margin: 6px 0 0 9px;
+    padding-left: 12px;
+    overflow-y: auto;
+    border-left: 2px solid var(--cl-border);
+    font-style: italic;
+    white-space: pre-wrap;
+    word-break: break-word;
+    animation: claude-rise 0.15s ease;
+  }
 }
 
 .claude-banner {
   padding: 12px;
-  border-radius: 12px;
+  border-radius: 10px;
   font-size: 13px;
-  background: rgba(239, 68, 68, 0.1);
-  border: 1px solid rgba(239, 68, 68, 0.35);
+  color: var(--cl-error);
+  background: var(--cl-error-bg);
+  border: 1px solid var(--cl-error-bg);
   p {
     margin: 6px 0;
     color: var(--cl-muted);
@@ -190,6 +479,7 @@
     padding: 6px 8px;
     border-radius: 6px;
     font-size: 12px;
+    color: var(--cl-text);
     background: var(--cl-surface);
     user-select: all;
   }
@@ -199,34 +489,41 @@
   }
 }
 
-.claude-empty {
+.claude-empty,
+.claude-connect {
   margin: auto;
   text-align: center;
-  max-width: 440px;
   h3 {
-    margin: 8px 0 2px;
+    margin: 10px 0 2px;
     font-size: 17px;
+    font-weight: 600;
   }
   p {
-    margin: 0 0 12px;
+    margin: 0 0 14px;
     font-size: 13px;
     color: var(--cl-muted);
   }
   .claude-empty-logo {
     display: inline-grid;
     place-items: center;
-    width: 44px;
-    height: 44px;
+    width: 48px;
+    height: 48px;
     border-radius: 14px;
-    color: #fff;
-    background: linear-gradient(135deg, #6965db, #ec4899);
+    color: var(--cl-accent-text);
+    background: var(--cl-accent);
     animation: claude-float 3s ease-in-out infinite;
   }
+}
+.claude-empty {
+  max-width: 440px;
+}
+.claude-connect {
+  max-width: 380px;
 }
 
 @keyframes claude-float {
   50% {
-    transform: translateY(-4px) rotate(4deg);
+    transform: translateY(-4px) rotate(8deg);
   }
 }
 
@@ -239,6 +536,7 @@
     border: 1px solid var(--cl-border);
     border-radius: 10px;
     text-align: left;
+    font: inherit;
     font-size: 12.5px;
     color: var(--cl-text);
     background: var(--cl-surface);
@@ -251,185 +549,69 @@
   }
 }
 
-.claude-msg {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  max-width: 92%;
-  &.user {
-    align-self: flex-end;
-    .claude-bubble {
-      color: #fff;
-      background: var(--cl-user);
-      border-bottom-right-radius: 4px;
-    }
-  }
-  &.assistant {
-    align-self: flex-start;
-    .claude-bubble {
-      background: var(--cl-surface);
-      border-bottom-left-radius: 4px;
-    }
-  }
-  &.error .claude-bubble {
-    color: #b91c1c;
-    background: rgba(239, 68, 68, 0.12);
-  }
-}
-
-.claude-bubble {
-  padding: 8px 12px;
-  border-radius: 14px;
-  font-size: 13.5px;
-  line-height: 1.45;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.claude-tools {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-.claude-chip {
-  padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 11px;
-  color: var(--cl-accent);
-  border: 1px solid var(--cl-border);
-  background: var(--cl-bg);
-}
-
-.claude-typing {
-  display: flex;
-  gap: 4px;
-  padding: 10px 12px;
-  width: fit-content;
-  border-radius: 14px;
-  background: var(--cl-surface);
-  i {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--cl-accent);
-    animation: claude-bounce 1s infinite ease-in-out;
-    &:nth-child(2) {
-      animation-delay: 0.15s;
-    }
-    &:nth-child(3) {
-      animation-delay: 0.3s;
-    }
-  }
-}
-@keyframes claude-bounce {
-  0%,
-  80%,
-  100% {
-    transform: translateY(0);
-    opacity: 0.4;
-  }
-  40% {
-    transform: translateY(-4px);
-    opacity: 1;
-  }
-}
-
 .claude-composer {
   display: flex;
   align-items: flex-end;
   gap: 8px;
-  padding: 10px 12px 12px;
-  border-top: 1px solid var(--cl-border);
-
+  margin: 0 12px 12px;
+  padding: 8px 8px 8px 12px;
+  border: 1px solid var(--cl-border);
+  border-radius: 14px;
+  background: var(--cl-raised);
+  transition: border-color 0.15s, box-shadow 0.15s;
+  &:focus-within {
+    border-color: var(--cl-accent);
+    box-shadow: 0 0 0 3px rgba(217, 119, 87, 0.22);
+  }
   textarea {
     flex: 1;
     resize: none;
-    max-height: 120px;
-    min-height: 38px;
-    padding: 9px 12px;
-    border: 1px solid var(--cl-border);
-    border-radius: 12px;
-    font: inherit;
-    font-size: 13.5px;
-    color: var(--cl-text);
-    background: var(--cl-surface);
-    field-sizing: content;
+    max-height: 140px;
+    min-height: 32px;
+    padding: 5px 0;
+    border: 0;
     outline: none;
-    &:focus {
-      border-color: var(--cl-accent);
-      box-shadow: 0 0 0 3px rgba(105, 101, 219, 0.2);
+    font: inherit;
+    font-size: 14px;
+    color: var(--cl-text);
+    background: transparent;
+    field-sizing: content;
+    &::placeholder {
+      color: var(--cl-muted);
     }
   }
 }
 
-.claude-send {
-  display: grid;
-  place-items: center;
-  width: 38px;
-  height: 38px;
-  border: 0;
-  border-radius: 12px;
-  color: #fff;
-  background: var(--cl-user);
-  cursor: pointer;
-  transition: transform 0.12s, opacity 0.12s;
-  &:hover:not(:disabled) {
-    transform: scale(1.06);
-  }
-  &:disabled {
-    opacity: 0.4;
-    cursor: default;
-  }
-  &.stop {
-    background: #ef4444;
-  }
-}
-
 @media (max-width: 640px) {
-  .claude-panel.dock-right,
-  .claude-panel.dock-bottom {
-    left: 8px;
-    right: 8px;
-    width: auto;
-    top: auto;
-    bottom: 8px;
-    height: min(70vh, 520px);
+  .claude-panel,
+  .claude-panel.wide {
+    width: 100%;
+  }
+  .claude-bar,
+  .claude-bar.panel-open,
+  .claude-bar.panel-open.wide {
+    left: 12px;
+    width: calc(100% - 24px - 58px);
+    transform: none;
+    bottom: 72px;
+  }
+  // the panel covers the canvas on phones
+  .claude-bar.panel-open {
+    display: none;
   }
 }
 
-.claude-connect {
-  margin: auto;
-  max-width: 400px;
-  text-align: center;
-  h3 {
-    margin: 8px 0 2px;
-    font-size: 17px;
-  }
-  p {
-    margin: 0 0 14px;
-    font-size: 13px;
-    color: var(--cl-muted);
-  }
-  .claude-empty-logo {
-    display: inline-grid;
-    place-items: center;
-    width: 44px;
-    height: 44px;
-    border-radius: 14px;
-    color: #fff;
-    background: linear-gradient(135deg, #6965db, #ec4899);
-    animation: claude-float 3s ease-in-out infinite;
-  }
-}
+// sign-in to the user's own Claude account ------------------------------------
 
 .claude-primary {
   padding: 9px 16px;
   border: 0;
   border-radius: 10px;
+  font: inherit;
   font-size: 13.5px;
   font-weight: 600;
-  color: #fff;
-  background: var(--cl-user);
+  color: var(--cl-accent-text);
+  background: var(--cl-accent);
   cursor: pointer;
   transition: transform 0.12s, opacity 0.12s;
   &:hover:not(:disabled) {
@@ -466,7 +648,7 @@
       border-radius: 10px;
       font: inherit;
       color: var(--cl-text);
-      background: var(--cl-surface);
+      background: var(--cl-raised);
       outline: none;
       &:focus {
         border-color: var(--cl-accent);
@@ -480,6 +662,6 @@
   padding: 8px 10px;
   border-radius: 8px;
   font-size: 12.5px;
-  color: #b91c1c;
-  background: rgba(239, 68, 68, 0.12);
+  color: var(--cl-error);
+  background: var(--cl-error-bg);
 }

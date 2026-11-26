@@ -18,13 +18,14 @@ import "./ClaudePanel.scss";
 
 import type { BridgeStatus } from "./claudeBridge";
 
-type Dock = "right" | "bottom";
-type Size = "small" | "large";
-
 type Message = {
   id: number;
   role: "user" | "assistant";
   text: string;
+  thinking: string;
+  /** ms spent thinking, set once the first answer/tool output arrives */
+  thinkingMs?: number;
+  thinkingStart?: number;
   tools: string[];
   error?: boolean;
 };
@@ -45,24 +46,20 @@ const TOOL_LABELS: Record<string, string> = {
   clear_canvas: "Clearing canvas",
 };
 
-const loadPrefs = (): { open: boolean; dock: Dock; size: Size } => {
+const loadPrefs = (): { open: boolean; wide: boolean } => {
   try {
     const raw = JSON.parse(localStorage.getItem(PREFS_KEY) || "{}");
-    return {
-      open: !!raw.open,
-      dock: raw.dock === "bottom" ? "bottom" : "right",
-      size: raw.size === "large" ? "large" : "small",
-    };
+    return { open: !!raw.open, wide: !!raw.wide };
   } catch {
-    return { open: false, dock: "right", size: "small" };
+    return { open: false, wide: false };
   }
 };
 
 const Icon = ({ d }: { d: string }) => (
   <svg
     viewBox="0 0 24 24"
-    width="18"
-    height="18"
+    width="16"
+    height="16"
     fill="none"
     stroke="currentColor"
     strokeWidth="1.8"
@@ -74,8 +71,47 @@ const Icon = ({ d }: { d: string }) => (
   </svg>
 );
 
-const SPARK =
-  "M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3zM19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15z";
+/** the Claude starburst */
+const ClaudeMark = ({ size = 18 }: { size?: number }) => (
+  <svg
+    viewBox="0 0 24 24"
+    width={size}
+    height={size}
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2.2"
+    strokeLinecap="round"
+    aria-hidden
+  >
+    {[0, 45, 90, 135, 180, 225, 270, 315].map((deg, i) => (
+      <line
+        key={deg}
+        x1="12"
+        y1={i % 2 ? 6.5 : 4}
+        x2="12"
+        y2="10"
+        transform={`rotate(${deg} 12 12)`}
+      />
+    ))}
+  </svg>
+);
+
+const SPINNER_FRAMES = ["·", "✢", "✳", "✶", "✻", "✽", "✻", "✶", "✳", "✢"];
+
+/** Claude Code's cycling spinner glyph */
+const Spinner = () => {
+  const [frame, setFrame] = useState(0);
+  useEffect(() => {
+    const id = window.setInterval(
+      () => setFrame((f) => (f + 1) % SPINNER_FRAMES.length),
+      120,
+    );
+    return () => window.clearInterval(id);
+  }, []);
+  return <span className="claude-spinner">{SPINNER_FRAMES[frame]}</span>;
+};
+
+const oneLine = (text: string) => text.replace(/\s+/g, " ").trim();
 
 /** sign-in to the user's own Claude account: open the link, paste the code */
 const ConnectCard = ({ onConnected }: { onConnected: () => void }) => {
@@ -122,7 +158,7 @@ const ConnectCard = ({ onConnected }: { onConnected: () => void }) => {
   return (
     <div className="claude-connect">
       <div className="claude-empty-logo">
-        <Icon d={SPARK} />
+        <ClaudeMark size={26} />
       </div>
       <h3>Connect your Claude account</h3>
       <p>
@@ -164,6 +200,38 @@ const ConnectCard = ({ onConnected }: { onConnected: () => void }) => {
   );
 };
 
+const ThinkingBlock = ({
+  message,
+  live,
+}: {
+  message: Message;
+  live: boolean;
+}) => {
+  const [expanded, setExpanded] = useState(false);
+  const seconds = Math.max(1, Math.round((message.thinkingMs || 0) / 1000));
+  return (
+    <div className="claude-thinking">
+      <button
+        type="button"
+        className="claude-thinking-head"
+        onClick={() => setExpanded((e) => !e)}
+        aria-expanded={expanded || live}
+      >
+        {live ? <Spinner /> : <span className="claude-spinner">✻</span>}
+        <span className={clsx({ "claude-shimmer": live })}>
+          {live ? "Thinking…" : `Thought for ${seconds}s`}
+        </span>
+        <span className={clsx("claude-caret", { open: expanded || live })}>
+          ›
+        </span>
+      </button>
+      {(expanded || live) && (
+        <div className="claude-thinking-body">{message.thinking.trim()}</div>
+      )}
+    </div>
+  );
+};
+
 export const ClaudePanel = ({
   excalidrawAPI,
   theme,
@@ -172,7 +240,7 @@ export const ClaudePanel = ({
   theme: "light" | "dark";
 }) => {
   const [prefs, setPrefs] = useState(loadPrefs);
-  const { open, dock, size } = prefs;
+  const { open, wide } = prefs;
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -194,10 +262,8 @@ export const ClaudePanel = ({
     });
   }, []);
 
+  // the bottom bar is always on screen, so always know the connection state
   useEffect(() => {
-    if (!open) {
-      return;
-    }
     let cancelled = false;
     const poll = async () => {
       const next = await getStatus();
@@ -215,14 +281,14 @@ export const ClaudePanel = ({
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [open, status]);
+  }, [status]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({
       top: scrollRef.current.scrollHeight,
       behavior: "smooth",
     });
-  }, [messages]);
+  }, [messages, open]);
 
   useEffect(() => {
     if (open) {
@@ -230,7 +296,7 @@ export const ClaudePanel = ({
     }
   }, [open]);
 
-  // after the panel moves/resizes, bring the drawing back into the free area
+  // after the panel opens/closes/resizes, bring the drawing back into view
   const isFirstLayout = useRef(true);
   useEffect(() => {
     if (isFirstLayout.current) {
@@ -249,22 +315,45 @@ export const ClaudePanel = ({
       }
     }, 300);
     return () => window.clearTimeout(id);
-  }, [open, dock, size, excalidrawAPI]);
+  }, [open, wide, excalidrawAPI]);
 
   const patchLast = (fn: (m: Message) => Message) =>
     setMessages((ms) => ms.map((m, i) => (i === ms.length - 1 ? fn(m) : m)));
 
+  // freezes the "Thought for Ns" timer when the answer/tools start
+  const endThinking = (m: Message): Message =>
+    m.thinkingStart && m.thinkingMs === undefined
+      ? { ...m, thinkingMs: Date.now() - m.thinkingStart }
+      : m;
+
   const send = async (text: string) => {
     const message = text.trim();
-    if (!message || busy || !ready) {
+    if (!message || busy) {
+      return;
+    }
+    if (!ready) {
+      // the connect / sign-in cards live in the chat panel
+      updatePrefs({ open: true });
       return;
     }
     setInput("");
     setBusy(true);
     setMessages((ms) => [
       ...ms,
-      { id: nextId.current++, role: "user", text: message, tools: [] },
-      { id: nextId.current++, role: "assistant", text: "", tools: [] },
+      {
+        id: nextId.current++,
+        role: "user",
+        text: message,
+        thinking: "",
+        tools: [],
+      },
+      {
+        id: nextId.current++,
+        role: "assistant",
+        text: "",
+        thinking: "",
+        tools: [],
+      },
     ]);
 
     const controller = new AbortController();
@@ -277,9 +366,16 @@ export const ClaudePanel = ({
       },
       {
         onSession: (id) => (sessionId.current = id),
-        onText: (delta) => patchLast((m) => ({ ...m, text: m.text + delta })),
+        onThinking: (delta) =>
+          patchLast((m) => ({
+            ...m,
+            thinking: m.thinking + delta,
+            thinkingStart: m.thinkingStart ?? Date.now(),
+          })),
+        onText: (delta) =>
+          patchLast((m) => ({ ...endThinking(m), text: m.text + delta })),
         onTool: (name) =>
-          patchLast((m) => ({ ...m, tools: [...m.tools, name] })),
+          patchLast((m) => ({ ...endThinking(m), tools: [...m.tools, name] })),
         onOps: (op) => applyOp(excalidrawAPI, op),
         onError: (msg, code) => {
           if (code === "offline") {
@@ -292,9 +388,9 @@ export const ClaudePanel = ({
           ) {
             setStatus({ state: "ok", loggedIn: false, email: null });
           }
-          patchLast((m) => ({ ...m, text: msg, error: true }));
+          patchLast((m) => ({ ...endThinking(m), text: msg, error: true }));
         },
-        onDone: () => {},
+        onDone: () => patchLast(endThinking),
       },
       controller.signal,
     );
@@ -318,226 +414,357 @@ export const ClaudePanel = ({
     setMessages([]);
   };
 
-  if (!open) {
-    return (
-      <button
-        className={clsx("claude-fab", `theme-${theme}`)}
-        onClick={() => updatePrefs({ open: true })}
-        title="Ask Claude to draw"
-        aria-label="Open Claude"
-      >
-        <Icon d={SPARK} />
-        <span>Claude</span>
-      </button>
-    );
-  }
+  const lastUser = [...messages].reverse().find((m) => m.role === "user");
+  const lastClaude = [...messages]
+    .reverse()
+    .find((m) => m.role === "assistant");
+  const liveClaude = busy && lastClaude === messages[messages.length - 1];
+
+  const claudeLine = (() => {
+    if (!lastClaude) {
+      return null;
+    }
+    if (lastClaude.text) {
+      return oneLine(lastClaude.text);
+    }
+    if (liveClaude) {
+      const tool = lastClaude.tools[lastClaude.tools.length - 1];
+      return tool ? `${TOOL_LABELS[tool] || tool}…` : "Thinking…";
+    }
+    return lastClaude.tools.length ? "Done" : "";
+  })();
+
+  const mark = (cls?: string) => (
+    <span className={clsx("claude-avatar", cls)}>
+      <ClaudeMark size={16} />
+    </span>
+  );
 
   return (
-    <aside
-      className={clsx(
-        "claude-panel",
-        `theme-${theme}`,
-        `dock-${dock}`,
-        `size-${size}`,
+    <div className={clsx("claude-root", `theme-${theme}`)}>
+      {/* the one entry point: a single Claude icon in the corner */}
+      {!open && (
+        <button
+          className="claude-fab"
+          onClick={() => updatePrefs({ open: true })}
+          title="Open Claude"
+          aria-label="Open Claude"
+        >
+          <ClaudeMark size={22} />
+        </button>
       )}
-      // lets the editor keep fitted content clear of the docked panel
-      data-viewport-ui={dock === "right" ? "side" : "bottom"}
-      aria-label="Claude chat"
-    >
-      <header className="claude-header">
-        <div className="claude-title">
-          <span className="claude-logo">
-            <Icon d={SPARK} />
-          </span>
-          <div>
-            <strong>Claude</strong>
-            <small
-              className={clsx("claude-status", {
-                up: ready,
-                down: status?.state === "offline",
-              })}
-            >
-              {!status
-                ? "connecting…"
-                : status.state === "offline"
-                ? "bridge offline"
-                : status.state === "signin_required"
-                ? "sign in required"
-                : status.loggedIn
-                ? status.email || "your Claude account"
-                : "not connected"}
-            </small>
+
+      {/* single-line chat at the bottom of the canvas */}
+      <div
+        className={clsx("claude-bar", {
+          "panel-open": open,
+          wide: open && wide,
+        })}
+      >
+        {(lastUser || lastClaude) && (
+          <div
+            className="claude-bar-lines"
+            role="button"
+            tabIndex={0}
+            title="Open the full conversation"
+            onClick={() => updatePrefs({ open: true })}
+            onKeyDown={(e) =>
+              (e.key === "Enter" || e.key === " ") &&
+              updatePrefs({ open: true })
+            }
+          >
+            {lastUser && (
+              <div className="claude-bar-line user">
+                <span className="claude-bar-prompt">&gt;</span>
+                <span className="claude-bar-text">
+                  {oneLine(lastUser.text)}
+                </span>
+              </div>
+            )}
+            {lastClaude && claudeLine !== "" && (
+              <div
+                className={clsx("claude-bar-line", {
+                  error: lastClaude.error,
+                })}
+              >
+                {liveClaude && !lastClaude.text ? (
+                  <Spinner />
+                ) : (
+                  <span className="claude-dot">●</span>
+                )}
+                <span
+                  className={clsx("claude-bar-text", {
+                    "claude-shimmer": liveClaude && !lastClaude.text,
+                  })}
+                >
+                  {claudeLine}
+                </span>
+              </div>
+            )}
           </div>
-        </div>
-        <div className="claude-actions">
-          <button
-            title="New chat"
-            onClick={reset}
-            disabled={!messages.length && !busy}
-          >
-            <Icon d="M12 5v14M5 12h14" />
-          </button>
-          <button
-            title={dock === "right" ? "Dock at bottom" : "Dock on the right"}
-            onClick={() =>
-              updatePrefs({ dock: dock === "right" ? "bottom" : "right" })
-            }
-          >
-            <Icon
-              d={
-                dock === "right"
-                  ? "M3 4h18v16H3zM3 14h18"
-                  : "M3 4h18v16H3zM15 4v16"
-              }
-            />
-          </button>
-          <button
-            title={size === "small" ? "Larger" : "Smaller"}
-            onClick={() =>
-              updatePrefs({ size: size === "small" ? "large" : "small" })
-            }
-          >
-            <Icon
-              d={
-                size === "small"
-                  ? "M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"
-                  : "M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"
-              }
-            />
-          </button>
-          {ready && (
-            <button title="Disconnect Claude account" onClick={signOutOfClaude}>
-              <Icon d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" />
+        )}
+        <form
+          className="claude-bar-input"
+          onSubmit={(e) => {
+            e.preventDefault();
+            send(input);
+          }}
+        >
+          {mark()}
+          <input
+            value={input}
+            placeholder="Ask Claude to draw or edit…"
+            aria-label="Message Claude"
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => e.stopPropagation()}
+          />
+          {busy ? (
+            <button
+              type="button"
+              className="claude-send stop"
+              onClick={stop}
+              title="Stop"
+              aria-label="Stop"
+            >
+              <Icon d="M7 7h10v10H7z" />
+            </button>
+          ) : (
+            <button
+              className="claude-send"
+              disabled={!input.trim()}
+              title="Send"
+              aria-label="Send"
+            >
+              <Icon d="M12 19V5M5 12l7-7 7 7" />
             </button>
           )}
-          <button title="Close" onClick={() => updatePrefs({ open: false })}>
-            <Icon d="M6 6l12 12M18 6L6 18" />
-          </button>
-        </div>
-      </header>
-
-      <div className="claude-messages" ref={scrollRef}>
-        {status?.state === "offline" && (
-          <div className="claude-banner">
-            <strong>Claude bridge isn't running</strong>
-            <p>
-              Self-hosted? Make sure the <code>claude-bridge</code> service is
-              up. Running locally? In a terminal:
-            </p>
-            <code>cd claude-bridge && yarn install && yarn start</code>
-          </div>
-        )}
-        {status?.state === "signin_required" && (
-          <div className="claude-connect">
-            <div className="claude-empty-logo">
-              <Icon d={SPARK} />
-            </div>
-            <h3>Sign in to use Claude</h3>
-            <p>Sign in to your account first, then connect your Claude plan.</p>
-            <button
-              className="claude-primary"
-              onClick={() => goToSignIn("signin")}
-            >
-              Sign in
-            </button>
-          </div>
-        )}
-        {status?.state === "ok" && !status.loggedIn && (
-          <ConnectCard onConnected={async () => setStatus(await getStatus())} />
-        )}
-        {ready && !messages.length && (
-          <div className="claude-empty">
-            <div className="claude-empty-logo">
-              <Icon d={SPARK} />
-            </div>
-            <h3>What shall we draw?</h3>
-            <p>Describe a diagram or scene and I'll build it on the canvas.</p>
-            <div className="claude-suggestions">
-              {SUGGESTIONS.map((s) => (
-                <button key={s} onClick={() => send(s)} disabled={busy}>
-                  {s}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-        {messages.map((m, i) => {
-          const isLast = i === messages.length - 1;
-          return (
-            <div
-              key={m.id}
-              className={clsx("claude-msg", m.role, { error: m.error })}
-            >
-              {m.tools.length > 0 && (
-                <div className="claude-tools">
-                  {m.tools.map((t, j) => (
-                    <span key={j} className="claude-chip">
-                      ✦ {TOOL_LABELS[t] || t}
-                    </span>
-                  ))}
-                </div>
-              )}
-              {(m.text || !(busy && isLast)) && (
-                <div className="claude-bubble">{m.text}</div>
-              )}
-              {busy && isLast && m.role === "assistant" && !m.text && (
-                <div className="claude-typing">
-                  <i />
-                  <i />
-                  <i />
-                </div>
-              )}
-            </div>
-          );
-        })}
+        </form>
       </div>
 
-      <form
-        className="claude-composer"
-        onSubmit={(e) => {
-          e.preventDefault();
-          send(input);
-        }}
-      >
-        <textarea
-          ref={inputRef}
-          value={input}
-          rows={1}
-          disabled={!ready}
-          placeholder={
-            ready ? "Ask Claude to draw or edit…" : "Connect Claude to start…"
-          }
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (
-              e.key === "Enter" &&
-              !e.shiftKey &&
-              !e.nativeEvent.isComposing
-            ) {
+      {open && (
+        <aside
+          className={clsx("claude-panel", { wide })}
+          // lets the editor keep fitted content clear of the docked panel
+          data-viewport-ui="side"
+          aria-label="Claude chat"
+        >
+          <header className="claude-header">
+            <div className="claude-title">
+              {mark("lg")}
+              <div>
+                <strong>Claude</strong>
+                <small
+                  className={clsx("claude-status", {
+                    up: ready,
+                    down: status?.state === "offline",
+                  })}
+                >
+                  {!status
+                    ? "connecting…"
+                    : status.state === "offline"
+                    ? "bridge offline"
+                    : status.state === "signin_required"
+                    ? "sign in required"
+                    : status.loggedIn
+                    ? status.email || "your Claude account"
+                    : "not connected"}
+                </small>
+              </div>
+            </div>
+            <div className="claude-actions">
+              <button
+                title="New chat"
+                onClick={reset}
+                disabled={!messages.length && !busy}
+              >
+                <Icon d="M12 5v14M5 12h14" />
+              </button>
+              <button
+                title={wide ? "Narrower" : "Wider"}
+                onClick={() => updatePrefs({ wide: !wide })}
+              >
+                <Icon
+                  d={
+                    wide
+                      ? "M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"
+                      : "M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"
+                  }
+                />
+              </button>
+              {ready && (
+                <button
+                  title="Disconnect Claude account"
+                  onClick={signOutOfClaude}
+                >
+                  <Icon d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" />
+                </button>
+              )}
+              <button
+                title="Close"
+                onClick={() => updatePrefs({ open: false })}
+              >
+                <Icon d="M6 6l12 12M18 6L6 18" />
+              </button>
+            </div>
+          </header>
+
+          <div className="claude-messages" ref={scrollRef}>
+            {status?.state === "offline" && (
+              <div className="claude-banner">
+                <strong>Claude bridge isn't running</strong>
+                <p>
+                  Self-hosted? Make sure the <code>claude-bridge</code> service
+                  is up. Running locally? In a terminal:
+                </p>
+                <code>cd claude-bridge && yarn install && yarn start</code>
+              </div>
+            )}
+            {status?.state === "signin_required" && (
+              <div className="claude-connect">
+                <div className="claude-empty-logo">
+                  <ClaudeMark size={26} />
+                </div>
+                <h3>Sign in to use Claude</h3>
+                <p>
+                  Sign in to your account first, then connect your Claude plan.
+                </p>
+                <button
+                  className="claude-primary"
+                  onClick={() => goToSignIn("signin")}
+                >
+                  Sign in
+                </button>
+              </div>
+            )}
+            {status?.state === "ok" && !status.loggedIn && (
+              <ConnectCard
+                onConnected={async () => setStatus(await getStatus())}
+              />
+            )}
+            {ready && !messages.length && (
+              <div className="claude-empty">
+                <div className="claude-empty-logo">
+                  <ClaudeMark size={26} />
+                </div>
+                <h3>What shall we draw?</h3>
+                <p>
+                  Describe a diagram or scene and I'll build it on the canvas.
+                </p>
+                <div className="claude-suggestions">
+                  {SUGGESTIONS.map((s) => (
+                    <button key={s} onClick={() => send(s)} disabled={busy}>
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {messages.map((m, i) => {
+              const isLast = i === messages.length - 1;
+              const live = busy && isLast && m.role === "assistant";
+              if (m.role === "user") {
+                return (
+                  <div key={m.id} className="claude-msg user">
+                    <div className="claude-user-text">{m.text}</div>
+                  </div>
+                );
+              }
+              const thinkingLive =
+                live && !!m.thinking && m.thinkingMs === undefined;
+              return (
+                <div
+                  key={m.id}
+                  className={clsx("claude-msg", { error: m.error })}
+                >
+                  {m.thinking && (
+                    <ThinkingBlock message={m} live={thinkingLive} />
+                  )}
+                  {m.tools.map((t, j) => {
+                    const toolLive =
+                      live && j === m.tools.length - 1 && !m.text;
+                    return (
+                      <div key={j} className="claude-tool">
+                        {toolLive ? (
+                          <Spinner />
+                        ) : (
+                          <span className="claude-dot ok">●</span>
+                        )}
+                        <span className={clsx({ "claude-shimmer": toolLive })}>
+                          {TOOL_LABELS[t] || t}
+                        </span>
+                      </div>
+                    );
+                  })}
+                  {m.text && (
+                    <div className="claude-reply">
+                      <span className="claude-dot">●</span>
+                      <div className="claude-reply-text">{m.text}</div>
+                    </div>
+                  )}
+                  {live && !m.text && !m.tools.length && !thinkingLive && (
+                    <div className="claude-tool">
+                      <Spinner />
+                      <span className="claude-shimmer">Thinking…</span>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <form
+            className="claude-composer"
+            onSubmit={(e) => {
               e.preventDefault();
               send(input);
-            }
-          }}
-        />
-        {busy ? (
-          <button
-            type="button"
-            className="claude-send stop"
-            onClick={stop}
-            title="Stop"
+            }}
           >
-            <Icon d="M7 7h10v10H7z" />
-          </button>
-        ) : (
-          <button
-            className="claude-send"
-            disabled={!ready || !input.trim()}
-            title="Send"
-          >
-            <Icon d="M5 12h14M13 6l6 6-6 6" />
-          </button>
-        )}
-      </form>
-    </aside>
+            <textarea
+              ref={inputRef}
+              value={input}
+              rows={1}
+              disabled={!ready}
+              placeholder={
+                ready
+                  ? "Ask Claude to draw or edit…"
+                  : "Connect Claude to start…"
+              }
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (
+                  e.key === "Enter" &&
+                  !e.shiftKey &&
+                  !e.nativeEvent.isComposing
+                ) {
+                  e.preventDefault();
+                  send(input);
+                }
+              }}
+            />
+            {busy ? (
+              <button
+                type="button"
+                className="claude-send stop"
+                onClick={stop}
+                title="Stop"
+                aria-label="Stop"
+              >
+                <Icon d="M7 7h10v10H7z" />
+              </button>
+            ) : (
+              <button
+                className="claude-send"
+                disabled={!ready || !input.trim()}
+                title="Send"
+                aria-label="Send"
+              >
+                <Icon d="M12 19V5M5 12l7-7 7 7" />
+              </button>
+            )}
+          </form>
+        </aside>
+      )}
+    </div>
   );
 };
