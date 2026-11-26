@@ -1,6 +1,6 @@
 # Deploying Excalidraw with the Plus server
 
-This deploys the app together with `plus-server/` (cloud scenes, sharing, teams, comments, presentations, voice, AI, REST API and MCP). One container serves the app and the API; Caddy in front of it gets an HTTPS certificate automatically.
+This deploys the app together with `plus-server/` (cloud scenes, sharing, teams, comments, presentations, voice, AI, REST API and MCP). One container serves the app and the API on `127.0.0.1:3015`; the Caddy already running on your server proxies your domain to it and handles HTTPS.
 
 HTTPS is required, not optional: browsers allow the microphone and screen sharing only on secure origins, and the session cookie is marked `Secure`.
 
@@ -8,8 +8,8 @@ HTTPS is required, not optional: browsers allow the microphone and screen sharin
 
 - A Linux server (Ubuntu 22.04+ or similar) with **2 GB RAM or more**. Building the image needs around 4 GB; on a smaller server add swap, or build elsewhere (see [Building on another machine](#building-on-another-machine)).
 - **Docker** with the Compose plugin: `curl -fsSL https://get.docker.com | sh`
+- **Caddy** already running on the server (installed natively, e.g. as the `caddy` systemd service).
 - A **domain** (e.g. `draw.example.com`) with an `A` record (and `AAAA` if you use IPv6) pointing at the server.
-- Ports **80 and 443** open in the firewall (80 is used to obtain the certificate).
 
 ## Deploy
 
@@ -30,7 +30,7 @@ HTTPS is required, not optional: browsers allow the microphone and screen sharin
    openssl rand -base64 32
    ```
 
-   Edit `.env.plus`: set `DOMAIN` to your domain and paste the random string into `PLUS_SECRET`. Optionally set `ANTHROPIC_API_KEY` so every user gets 100 AI requests a day; without it, users can still add their own key in Account settings. Keep `PLUS_SECRET` stable: changing it makes stored AI keys unreadable. Never commit `.env.plus` (it's gitignored).
+   Edit `.env.plus`: set `DOMAIN` to your domain (and `PLUS_PORT` if 3015 is taken on the server) and paste the random string into `PLUS_SECRET`. Optionally set `ANTHROPIC_API_KEY` so every user gets 100 AI requests a day; without it, users can still add their own key in Account settings. Keep `PLUS_SECRET` stable: changing it makes stored AI keys unreadable. Never commit `.env.plus` (it's gitignored).
 
 3. Build and start:
 
@@ -38,13 +38,29 @@ HTTPS is required, not optional: browsers allow the microphone and screen sharin
    docker compose -f docker-compose.plus.yml --env-file .env.plus up -d --build
    ```
 
-   The first build takes a few minutes. Check that both services are up:
+   The first build takes a few minutes. Check that it's up:
 
    ```bash
    docker compose -f docker-compose.plus.yml --env-file .env.plus ps
    ```
 
-   `plus` should show `(healthy)` after about 30 seconds. Open `https://your-domain` in a browser.
+   `plus` should show `(healthy)` after about 30 seconds. It only listens on localhost:
+
+   ```bash
+   curl http://127.0.0.1:3015/api/health
+   ```
+
+4. Point Caddy at it. Add the site block from `Caddyfile.plus` to your Caddyfile (usually `/etc/caddy/Caddyfile`), replacing `draw.example.com` with your domain (and the port, if you changed `PLUS_PORT`). Keep the `flush_interval -1` line and the `encode` match list: they stop Caddy from buffering or compressing the event streams that live sync and voice use. Then check and reload:
+
+   ```bash
+   caddy validate --config /etc/caddy/Caddyfile
+   ```
+
+   ```bash
+   sudo systemctl reload caddy
+   ```
+
+   Open `https://your-domain` in a browser.
 
 ## Test the deployment
 
@@ -134,6 +150,8 @@ docker compose -f docker-compose.plus.yml --env-file .env.plus run --rm --no-dep
 docker compose -f docker-compose.plus.yml --env-file .env.plus start plus
 ```
 
+Updates don't need a Caddy reload; the site block stays the same.
+
 Roll back a bad update: `git checkout <previous commit>` and run the `up -d --build` command again.
 
 ## Building on another machine
@@ -162,9 +180,9 @@ yarn install --frozen-lockfile
 yarn build:app:docker
 ```
 
-Run `node plus-server/src/index.ts` as a service with the variables from `.env.plus.example`, plus `PLUS_PUBLIC_URL=https://your-domain`, `PLUS_SECURE_COOKIES=true` and `PLUS_DATA_DIR=/var/lib/excalidraw-plus`. It listens on port 3015 and serves `excalidraw-app/build` itself.
+Run `node plus-server/src/index.ts` as a service with the variables from `.env.plus.example` (set `PORT` instead of `PLUS_PORT`), plus `PLUS_PUBLIC_URL=https://your-domain`, `PLUS_SECURE_COOKIES=true` and `PLUS_DATA_DIR=/var/lib/excalidraw-plus`. It listens on port 3015 and serves `excalidraw-app/build` itself.
 
-With nginx, proxy everything to it and turn buffering off, or live sync and voice stop working:
+Use the same `Caddyfile.plus` site block. With nginx instead, proxy everything to it and turn buffering off, or live sync and voice stop working:
 
 ```nginx
 location / {
@@ -185,8 +203,9 @@ Run a single instance: realtime state (presence, voice signaling) lives in the s
 
 | Symptom | Cause and fix |
 | --- | --- |
-| Caddy logs certificate errors | DNS doesn't point at the server yet, or port 80 is blocked. Fix it and run `docker compose ... restart caddy`. |
-| Top bar shows **Offline**, edits don't appear in other windows | Event streams are buffered by a proxy in front (e.g. Cloudflare, nginx). Turn off buffering for the site; the smoke test's event stream check confirms the fix. |
+| Caddy logs certificate errors | DNS doesn't point at the server yet, or port 80 is blocked. Fix it and run `sudo systemctl reload caddy`. |
+| `502 Bad Gateway` from Caddy | The container isn't running or uses another port: check `docker compose ... ps` and that the `reverse_proxy` port matches `PLUS_PORT`. |
+| Top bar shows **Offline**, edits don't appear in other windows | Event streams are being buffered: the Caddy site block lacks `flush_interval -1` or compresses `text/event-stream`, or another proxy (e.g. Cloudflare) buffers them. The smoke test's event stream check confirms the fix. |
 | Signed in, but reloading signs you out | The site isn't on HTTPS while `PLUS_SECURE_COOKIES=true`. Use the HTTPS URL. |
 | Share links point at the wrong domain | `DOMAIN` in `.env.plus` doesn't match the URL you use. |
 | **Voice** asks nothing / mic is blocked | The page isn't on HTTPS, or the browser blocked the microphone for the site. |

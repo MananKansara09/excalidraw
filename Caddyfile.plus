@@ -1,4 +1,8 @@
-{$DOMAIN} {
+# Site block for the Caddy running on the host. Add it to your Caddyfile
+# (usually /etc/caddy/Caddyfile), replace the domain, then reload Caddy.
+# The port must match PLUS_PORT in .env.plus (default 3015).
+
+draw.example.com {
 	# compress static assets only: event streams must reach clients unbuffered
 	encode gzip zstd {
 		match {
@@ -10,7 +14,7 @@
 			header Content-Type image/svg+xml*
 		}
 	}
-	reverse_proxy plus:3015 {
+	reverse_proxy 127.0.0.1:3015 {
 		flush_interval -1
 	}
 }
