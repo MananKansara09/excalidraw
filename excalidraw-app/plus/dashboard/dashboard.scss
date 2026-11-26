@@ -428,7 +428,47 @@
 }
 
 .dash-card {
+  position: relative;
   min-width: 0;
+
+  &__quick {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    display: flex;
+    gap: 0.25rem;
+    padding: 0.2rem;
+    border-radius: 8px;
+    background: var(--dash-panel);
+    border: 1px solid var(--dash-border);
+    opacity: 0;
+    transition: opacity 0.12s;
+  }
+
+  &:hover &__quick,
+  &:focus-within &__quick {
+    opacity: 1;
+  }
+
+  // no hover on touch screens: keep the buttons visible
+  @media (hover: none) {
+    &__quick {
+      opacity: 1;
+    }
+  }
+
+  &__edit {
+    flex: 1;
+    min-width: 0;
+    padding: 0.1rem 0.35rem;
+    border: 1px solid var(--dash-primary);
+    border-radius: 6px;
+    background: var(--dash-bg);
+    color: var(--dash-text);
+    font: inherit;
+    font-weight: 600;
+    outline: none;
+  }
 
   &[draggable="true"] {
     cursor: grab;
@@ -572,6 +612,10 @@
     &:hover {
       background: var(--dash-primary-hover);
     }
+  }
+
+  &--danger:hover {
+    color: var(--dash-danger);
   }
 }
 

@@ -76,6 +76,9 @@ const ICONS = {
   at: "M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0zM16 12v1.5a2.5 2.5 0 0 0 5 0V12a9 9 0 1 0-3.5 7.1",
   import: "M4 12h11M11 8l4 4-4 4M20 4v16",
   file: "M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5M12 11v6M9 14h6",
+  edit: "M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4",
+  trash:
+    "M4 7h16M10 11v6M14 11v6M6 7l1 12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-12M9 7V4h6v3",
   more: "M5 12h.01M12 12h.01M19 12h.01",
   sort: "M7 4v16M7 20l-3-3M7 20l3-3M17 20V4M17 4l-3 3M17 4l3 3",
   chevron: "M6 9l6 6 6-6",
@@ -319,15 +322,20 @@ const Dashboard = ({
     }
   };
 
-  const renameScene = async (scene: SceneSummary) => {
-    const name = await modal.prompt({
-      title: "Rename scene",
-      label: "Name",
-      initialValue: scene.name,
-    });
-    if (name && name !== scene.name) {
-      await run(() => plusAPI.updateScene(scene.id, { name }));
-      load();
+  const renameScene = async (scene: SceneSummary, name: string) => {
+    const next = name.trim();
+    if (!next || next === scene.name) {
+      return;
+    }
+    const previous = scenes;
+    setScenes((current) =>
+      current.map((s) => (s.id === scene.id ? { ...s, name: next } : s)),
+    );
+    const updated = await run(() =>
+      plusAPI.updateScene(scene.id, { name: next }),
+    );
+    if (!updated) {
+      setScenes(previous);
     }
   };
 
@@ -824,7 +832,7 @@ const Dashboard = ({
                       setDragging(null);
                       setDropKey(null);
                     }}
-                    onRename={() => renameScene(scene)}
+                    onRename={(name) => renameScene(scene, name)}
                     onDuplicate={() => duplicateScene(scene)}
                     onMove={() => setMovingScene(scene)}
                     onDelete={() => deleteScene(scene)}
@@ -992,25 +1000,37 @@ const SceneCard = ({
   onOpen: () => void;
   onDragStart: (event: React.DragEvent) => void;
   onDragEnd: () => void;
-  onRename: () => void;
+  onRename: (name: string) => void;
   onDuplicate: () => void;
   onMove: () => void;
   onDelete: () => void;
 }) => {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(scene.name);
+
+  const startEditing = () => {
+    setDraft(scene.name);
+    setEditing(true);
+  };
+  const finishEditing = (save: boolean) => {
+    setEditing(false);
+    if (save) {
+      onRename(draft);
+    }
+  };
+
   const items = [
-    { label: "Rename", onSelect: onRename },
+    { label: "Rename", onSelect: startEditing },
     { label: "Duplicate", onSelect: onDuplicate },
+    ...(manageable ? [{ label: "Move to…", onSelect: onMove }] : []),
     ...(manageable
-      ? [
-          { label: "Move to…", onSelect: onMove },
-          { label: "Delete", onSelect: onDelete, danger: true },
-        ]
+      ? [{ label: "Delete", onSelect: onDelete, danger: true }]
       : []),
   ];
   return (
     <li
       className={clsx("dash-card", { "is-dragging": isDragging })}
-      draggable={draggable}
+      draggable={draggable && !editing}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
     >
@@ -1020,15 +1040,58 @@ const SceneCard = ({
         </span>
         <span className="dash-card__time">{timeAgo(scene.updatedAt)}</span>
       </button>
+      {editable && !editing && (
+        <div className="dash-card__quick">
+          <button
+            className="dash-icon-btn"
+            title="Rename"
+            aria-label={`Rename ${scene.name}`}
+            onClick={startEditing}
+          >
+            <Icon d={ICONS.edit} size={16} />
+          </button>
+          {manageable && (
+            <button
+              className="dash-icon-btn dash-icon-btn--danger"
+              title="Delete"
+              aria-label={`Delete ${scene.name}`}
+              onClick={onDelete}
+            >
+              <Icon d={ICONS.trash} size={16} />
+            </button>
+          )}
+        </div>
+      )}
       <div className="dash-card__meta">
         <div className="dash-card__row">
-          <button
-            className="dash-card__name"
-            onClick={onOpen}
-            title={scene.name}
-          >
-            {scene.name}
-          </button>
+          {editing ? (
+            <input
+              className="dash-card__edit"
+              aria-label="Scene name"
+              value={draft}
+              maxLength={120}
+              autoFocus
+              onFocus={(event) => event.target.select()}
+              onChange={(event) => setDraft(event.target.value)}
+              onBlur={() => finishEditing(true)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  finishEditing(true);
+                } else if (event.key === "Escape") {
+                  event.stopPropagation();
+                  finishEditing(false);
+                }
+              }}
+            />
+          ) : (
+            <button
+              className="dash-card__name"
+              onClick={onOpen}
+              title={scene.name}
+            >
+              {scene.name}
+            </button>
+          )}
           {editable && (
             <Menu label={`Options for ${scene.name}`} items={items} />
           )}
