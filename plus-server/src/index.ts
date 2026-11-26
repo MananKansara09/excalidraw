@@ -34,8 +34,10 @@ const staticDir =
   env.PLUS_STATIC_DIR ||
   (existsSync(defaultStaticDir) ? defaultStaticDir : null);
 
+const db = openDatabase(join(dataDir, "plus.sqlite"));
+
 const { server, ctx } = createApp({
-  db: openDatabase(join(dataDir, "plus.sqlite")),
+  db,
   secret: loadSecret(),
   config: {
     aiDailyLimit: Number(env.PLUS_AI_DAILY_LIMIT || 100),
@@ -66,7 +68,11 @@ server.listen(port, () => {
 const shutdown = () => {
   // open event streams would otherwise keep the server from closing
   ctx.hub.close();
-  server.close(() => process.exit(0));
+  server.close(() => {
+    // checkpoints the write-ahead log into the database file
+    db.close();
+    process.exit(0);
+  });
   server.closeAllConnections();
 };
 process.on("SIGINT", shutdown);

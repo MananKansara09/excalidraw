@@ -1,0 +1,36 @@
+# Production deployment: Excalidraw + Plus server behind Caddy (automatic
+# HTTPS). Set DOMAIN and PLUS_SECRET in .env.plus first. See DEPLOY.md.
+
+services:
+  plus:
+    build:
+      context: .
+      dockerfile: Dockerfile.plus
+    restart: unless-stopped
+    env_file: .env.plus
+    environment:
+      PLUS_PUBLIC_URL: https://${DOMAIN}
+      PLUS_SECURE_COOKIES: "true"
+    volumes:
+      - plus-data:/data
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - plus
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./Caddyfile.plus:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  plus-data:
+  caddy-data:
+  caddy-config:

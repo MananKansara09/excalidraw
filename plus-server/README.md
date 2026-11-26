@@ -18,6 +18,8 @@ It needs Node.js 22.18 or later (built-in SQLite and TypeScript type stripping) 
 
 ## Running it
 
+To deploy to a server, follow [DEPLOY.md](../DEPLOY.md) (Docker + automatic HTTPS, with a post-deploy smoke test).
+
 In development, run the server next to the app's Vite dev server, which proxies `/api` and `/mcp` to it so the app reaches it same-origin:
 
 ```bash

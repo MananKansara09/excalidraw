@@ -1,0 +1,16 @@
+{$DOMAIN} {
+	# compress static assets only: event streams must reach clients unbuffered
+	encode gzip zstd {
+		match {
+			header Content-Type text/html*
+			header Content-Type text/css*
+			header Content-Type text/javascript*
+			header Content-Type application/javascript*
+			header Content-Type application/json*
+			header Content-Type image/svg+xml*
+		}
+	}
+	reverse_proxy plus:3015 {
+		flush_interval -1
+	}
+}

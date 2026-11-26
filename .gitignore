@@ -27,3 +27,6 @@ dev-dist
 html
 meta*.json
 .claude
+
+# Plus server deployment secrets
+.env.plus
