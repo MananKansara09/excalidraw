@@ -37,6 +37,8 @@ export type SceneSummary = {
   elementCount: number;
   createdAt: number;
   updatedAt: number;
+  /** When the preview image was rendered; `null` if there is none yet. */
+  thumbnailAt?: number | null;
   role?: SceneRole;
 };
 
@@ -248,6 +250,10 @@ const q = (params: Record<string, string | null | undefined>) => {
   return str ? `?${str}` : "";
 };
 
+/** The preview image of a scene (`thumbnailAt` busts the browser cache). */
+export const sceneThumbnailURL = (id: string, thumbnailAt: number) =>
+  `${PLUS_API_BASE}/scenes/${id}/thumbnail?v=${thumbnailAt}`;
+
 export const plusAPI = {
   // account
   me: () => plusFetch<{ user: PlusUser }>("/me"),
@@ -375,6 +381,11 @@ export const plusAPI = {
     plusFetch<{ scene: SceneSummary }>(`/scenes/${id}`, {
       method: "PATCH",
       body,
+    }),
+  setSceneThumbnail: (id: string, image: string) =>
+    plusFetch<{ thumbnailAt: number }>(`/scenes/${id}/thumbnail`, {
+      method: "PUT",
+      body: { image },
     }),
   duplicateScene: (id: string) =>
     plusFetch<{ scene: SceneSummary }>(`/scenes/${id}/duplicate`, {

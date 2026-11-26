@@ -33,6 +33,8 @@ export type SceneRow = {
   version: number;
   created_at: number;
   updated_at: number;
+  thumbnail?: string | null;
+  thumbnail_at?: number | null;
 };
 
 export const getTeamRole = (

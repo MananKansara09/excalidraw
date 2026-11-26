@@ -158,6 +158,8 @@ export const sceneSummary = (scene: SceneRow, role?: SceneRole | null) => {
     elementCount: elements.filter((element) => !element.isDeleted).length,
     createdAt: scene.created_at,
     updatedAt: scene.updated_at,
+    /** When the preview image was rendered; `null` if there is none yet. */
+    thumbnailAt: scene.thumbnail ? scene.thumbnail_at ?? null : null,
     ...(role ? { role } : {}),
   };
 };

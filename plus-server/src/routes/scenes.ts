@@ -292,6 +292,66 @@ export const registerSceneRoutes = (router: Router, ctx: AppContext) => {
     );
   };
 
+  // thumbnails: a small image the editor renders when it saves. Stored as a
+  // data URL, served as the image itself so a card can use it as `<img src>`.
+  const THUMBNAIL_RE =
+    /^data:(image\/(?:png|webp|jpeg));base64,([A-Za-z0-9+/=]+)$/;
+  const MAX_THUMBNAIL_CHARS = 400_000;
+
+  router.put("/api/v1/scenes/:sceneId/thumbnail", async (req) => {
+    const user = requireUser(db, req);
+    const { scene } = loadSceneForRole(
+      db,
+      req,
+      user,
+      req.params.sceneId,
+      "editor",
+    );
+    const body = await req.body();
+    const image = body.image;
+    if (
+      typeof image !== "string" ||
+      image.length > MAX_THUMBNAIL_CHARS ||
+      !THUMBNAIL_RE.test(image)
+    ) {
+      throw badRequest(
+        '"image" must be a png, webp or jpeg data URL of at most 400 KB',
+      );
+    }
+    // not `updated_at`/`version`: a preview isn't an edit
+    run(
+      db,
+      "UPDATE scenes SET thumbnail = ?, thumbnail_at = ? WHERE id = ?",
+      image,
+      now(),
+      scene.id,
+    );
+    return { thumbnailAt: now() };
+  });
+
+  router.get("/api/v1/scenes/:sceneId/thumbnail", (req, res) => {
+    const user = getUser(db, req);
+    const { scene } = loadSceneForRole(
+      db,
+      req,
+      user,
+      req.params.sceneId,
+      "viewer",
+    );
+    const match = scene.thumbnail ? THUMBNAIL_RE.exec(scene.thumbnail) : null;
+    if (!match) {
+      throw notFound("No thumbnail");
+    }
+    const bytes = Buffer.from(match[2], "base64");
+    res.writeHead(200, {
+      "Content-Type": match[1],
+      "Content-Length": bytes.length,
+      // the client adds ?v=<thumbnailAt>, so a changed image has a new URL
+      "Cache-Control": "private, max-age=86400",
+    });
+    res.end(bytes);
+  });
+
   router.put("/api/v1/scenes/:sceneId", (req) => saveContent(req, true));
   router.post("/api/v1/scenes/:sceneId/sync", (req) => saveContent(req, false));
 
@@ -393,6 +453,17 @@ export const registerSceneRoutes = (router: Router, ctx: AppContext) => {
       appState: JSON.parse(scene.app_state),
       files: getSceneFiles(db, scene.id),
     });
+    if (scene.thumbnail) {
+      run(
+        db,
+        "UPDATE scenes SET thumbnail = ?, thumbnail_at = ? WHERE id = ?",
+        scene.thumbnail,
+        scene.thumbnail_at ?? now(),
+        copy.id,
+      );
+      copy.thumbnail = scene.thumbnail;
+      copy.thumbnail_at = scene.thumbnail_at ?? null;
+    }
     return { scene: sceneSummary(copy, "owner") };
   });
 
@@ -999,8 +1070,7 @@ export const registerSceneRoutes = (router: Router, ctx: AppContext) => {
       comment,
     });
 
-    const snippet =
-      text.length > 100 ? `${text.slice(0, 100).trim()}…` : text;
+    const snippet = text.length > 100 ? `${text.slice(0, 100).trim()}…` : text;
     const targetCommentId = parentId ?? id;
     const mentionedIds = new Set<string>();
 
