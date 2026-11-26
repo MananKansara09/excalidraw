@@ -11,8 +11,11 @@ import { vi } from "vitest";
 import { StoreIncrement } from "@excalidraw/element";
 
 import type { DurableIncrement, EphemeralIncrement } from "@excalidraw/element";
+import type { SocketId } from "@excalidraw/excalidraw/types";
 
 import ExcalidrawApp from "../App";
+import { appJotaiStore } from "../app-jotai";
+import { followedUserActivityAtom } from "../collab/Collab";
 
 const { h } = window;
 
@@ -247,6 +250,53 @@ describe("collaboration", () => {
         expect.objectContaining(rect1Props),
         expect.objectContaining({ ...rect2Props, isDeleted: true }),
       ]);
+    });
+  });
+
+  it("tracks followed collaborator activity in status frame and clears on unfollow", async () => {
+    const { container } = await render(<ExcalidrawApp />);
+    const remoteSocketId = "remote-1" as SocketId;
+
+    act(() => {
+      window.collab.updateCollaborator(remoteSocketId, {
+        username: "Bob",
+        activity: { tool: "text", isEditingText: true },
+      });
+      window.collab.setUserToFollow({
+        socketId: remoteSocketId,
+        username: "Bob",
+      });
+    });
+
+    await waitFor(() => {
+      expect(appJotaiStore.get(followedUserActivityAtom)).toBe("Editing text");
+      const badge = container.querySelector(".viewport-status-frame__badge");
+      expect(badge?.textContent).toContain("Following");
+      expect(badge?.textContent).toContain("Bob");
+      expect(badge?.textContent).toContain("Editing text");
+    });
+
+    act(() => {
+      window.collab.updateCollaborator(remoteSocketId, {
+        activity: { tool: "laser" },
+      });
+    });
+
+    await waitFor(() => {
+      expect(appJotaiStore.get(followedUserActivityAtom)).toBe(
+        "Using laser pointer",
+      );
+    });
+
+    act(() => {
+      window.collab.setUserToFollow(null);
+    });
+
+    await waitFor(() => {
+      expect(appJotaiStore.get(followedUserActivityAtom)).toBeNull();
+      expect(
+        container.querySelector(".viewport-status-frame__badge"),
+      ).toBeNull();
     });
   });
 });

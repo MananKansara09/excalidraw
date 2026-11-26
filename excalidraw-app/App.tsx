@@ -42,6 +42,7 @@ import {
   XBrandIcon,
   DiscordIcon,
   ExcalLogo,
+  eyeIcon,
   usersIcon,
   exportToPlus,
   share,
@@ -96,6 +97,7 @@ import {
 import { APP_ROUTES } from "./app_routes";
 import Collab, {
   collabAPIAtom,
+  followedUserActivityAtom,
   isCollaboratingAtom,
   isOfflineAtom,
   userToFollowAtom,
@@ -155,12 +157,22 @@ import { PlusRoot, usePlusSession } from "./plus/components/PlusRoot";
 import { PlusTopRight } from "./plus/components/PlusTopRight";
 import { hangout } from "./plus/hangout";
 import {
+  cloudFollowedActivityAtom,
   cloudSceneAtom,
+  cloudUserToFollowAtom,
   plusDialogAtom,
   plusUserAtom,
   presentationAtom,
 } from "./plus/state";
 import "./plus/plus.scss";
+import {
+  notificationCenterOpenAtom,
+  notificationEngine,
+  type AppNotification,
+} from "./notifications";
+import { CanvasMentionAutocomplete } from "./notifications/components/CanvasMentionAutocomplete";
+import { NotificationBell } from "./notifications/components/NotificationBell";
+import { NotificationToastStack } from "./notifications/components/NotificationToast";
 
 import type { CollabAPI } from "./collab/Collab";
 
@@ -459,6 +471,7 @@ const ExcalidrawWrapper = () => {
   }, []);
 
   const [, setShareDialogState] = useAtom(shareDialogStateAtom);
+  const [, setNotificationCenterOpen] = useAtom(notificationCenterOpenAtom);
   const [collabAPI] = useAtom(collabAPIAtom);
 
   usePlusSession();
@@ -466,18 +479,30 @@ const ExcalidrawWrapper = () => {
   const plusUser = useAtomValue(plusUserAtom);
   const setPlusDialog = useSetAtom(plusDialogAtom);
   const setPresentation = useSetAtom(presentationAtom);
+  const pendingMentionFocusRef = useRef<{
+    elementId: string;
+    containerId?: string | null;
+  } | null>(null);
   const [isCollaborating] = useAtomWithInitialValue(isCollaboratingAtom, () => {
     return isCollaborationLink(window.location.href);
   });
   const collabError = useAtomValue(collabErrorIndicatorAtom);
   const userToFollow = useAtomValue(userToFollowAtom);
+  const followedUserActivity = useAtomValue(followedUserActivityAtom);
+  const cloudUserToFollow = useAtomValue(cloudUserToFollowAtom);
+  const cloudFollowedActivity = useAtomValue(cloudFollowedActivityAtom);
+  const activeUserToFollow = cloudScene ? cloudUserToFollow : userToFollow;
+  const activeFollowedActivity = cloudScene
+    ? cloudFollowedActivity
+    : followedUserActivity;
 
   const viewportStatusFrame = useMemo(
     () =>
-      userToFollow
+      activeUserToFollow
         ? {
             border: "var(--color-primary-hover)",
             label: {
+              icon: eyeIcon,
               label: (
                 <>
                   Following{" "}
@@ -489,17 +514,31 @@ const ExcalidrawWrapper = () => {
                       textOverflow: "ellipsis",
                       maxWidth: 100,
                     }}
-                    title={userToFollow.username}
+                    title={activeUserToFollow.username}
                   >
-                    {userToFollow.username}
+                    {activeUserToFollow.username}
                   </span>
+                  {activeFollowedActivity && (
+                    <span
+                      style={{
+                        opacity: 0.85,
+                        fontSize: "0.7rem",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      • {activeFollowedActivity}
+                    </span>
+                  )}
                 </>
               ),
-              onClose: () => collabAPI?.setUserToFollow(null),
+              onClose: () =>
+                cloudScene
+                  ? cloudSession.setUserToFollow(null)
+                  : collabAPI?.setUserToFollow(null),
             },
           }
         : null,
-    [userToFollow, collabAPI],
+    [activeUserToFollow, activeFollowedActivity, cloudScene, collabAPI],
   );
 
   useHandleLibrary({
@@ -625,12 +664,22 @@ const ExcalidrawWrapper = () => {
   );
 
   useEffect(() => {
+    void notificationEngine.init();
+    return () => {
+      notificationEngine.destroy();
+    };
+  }, []);
+
+  useEffect(() => {
     if (!excalidrawAPI || (!isCollabDisabled && !collabAPI)) {
       return;
     }
 
     initializeScene({ collabAPI, excalidrawAPI }).then(async (data) => {
       loadImages(data, /* isInitialLoad */ true);
+      if (data.scene?.elements) {
+        notificationEngine.seedCanvasElements(data.scene.elements);
+      }
       initialStatePromiseRef.current.promise.resolve(data.scene);
     });
 
@@ -694,7 +743,9 @@ const ExcalidrawWrapper = () => {
               });
             }
           });
-          collabAPI?.setUsername(username || "");
+          if (!collabAPI?.getUsername()) {
+            collabAPI?.setUsername(username || "");
+          }
         }
 
         if (isBrowserStorageStateNewer(STORAGE_KEYS.VERSION_FILES)) {
@@ -797,7 +848,34 @@ const ExcalidrawWrapper = () => {
       collabAPI.syncElements(elements);
     }
 
-    cloudSession.onLocalChange(elements, appState);
+    void notificationEngine.processCanvasElements(elements, {
+      editingElementId: appState.editingTextElement?.id ?? null,
+      roomId: collabAPI?.getRoomId() ?? null,
+      roomLink: collabAPI?.getActiveRoomLink() ?? null,
+    });
+
+    if (pendingMentionFocusRef.current && excalidrawAPI) {
+      const targetInfo = pendingMentionFocusRef.current;
+      const found =
+        elements.find(
+          (el) => !el.isDeleted && el.id === targetInfo.elementId,
+        ) ||
+        (targetInfo.containerId
+          ? elements.find(
+              (el) => !el.isDeleted && el.id === targetInfo.containerId,
+            )
+          : undefined);
+      if (found) {
+        pendingMentionFocusRef.current = null;
+        excalidrawAPI.setViewport({
+          target: found,
+          fit: "scale-down",
+          animation: true,
+          offsets: { ui: true },
+        });
+        excalidrawAPI.selection.select([found]);
+      }
+    }
 
     // this check is redundant, but since this is a hot path, it's best
     // not to evaludate the nested expression every time
@@ -914,6 +992,102 @@ const ExcalidrawWrapper = () => {
   const onCollabDialogOpen = useCallback(
     () => setShareDialogState({ isOpen: true, type: "collaborationOnly" }),
     [setShareDialogState],
+  );
+
+  const focusCanvasElement = useCallback(
+    (elementId: string, containerId?: string | null) => {
+      if (!excalidrawAPI) {
+        return false;
+      }
+      const elements = excalidrawAPI.getSceneElements();
+      const target =
+        elements.find((el) => el.id === elementId) ||
+        (containerId
+          ? elements.find((el) => el.id === containerId)
+          : undefined);
+
+      if (!target) {
+        return false;
+      }
+
+      excalidrawAPI.setViewport({
+        target,
+        fit: "scale-down",
+        animation: true,
+        offsets: { ui: true },
+      });
+      excalidrawAPI.selection.select([target]);
+      return true;
+    },
+    [excalidrawAPI],
+  );
+
+  const joinSharedRoomLink = useCallback(
+    async (roomLink: string) => {
+      if (!collabAPI || !excalidrawAPI) {
+        return;
+      }
+      const linkData = getCollaborationLinkData(roomLink);
+      if (!linkData) {
+        return;
+      }
+      if (collabAPI.getRoomId() === linkData.roomId) {
+        excalidrawAPI.setToast({
+          message: "Already viewing this shared canvas.",
+          duration: 3000,
+          closable: true,
+        });
+        return;
+      }
+      if (collabAPI.isCollaborating()) {
+        collabAPI.stopCollaboration(false);
+      }
+      window.history.pushState({}, APP_NAME, roomLink);
+      const scene = await collabAPI.startCollaboration(linkData);
+      if (scene?.elements) {
+        notificationEngine.seedCanvasElements(scene.elements);
+        excalidrawAPI.updateScene({
+          elements: restoreElements(scene.elements, null, {
+            repairBindings: true,
+          }),
+          captureUpdate: CaptureUpdateAction.NEVER,
+        });
+      }
+    },
+    [collabAPI, excalidrawAPI],
+  );
+
+  const handleSelectNotification = useCallback(
+    async (notification: AppNotification) => {
+      if (notification.type === "share_invite") {
+        await joinSharedRoomLink(notification.payload.roomLink);
+        return;
+      }
+
+      if (notification.type === "canvas_mention") {
+        const { elementId, containerId, roomId, roomLink } =
+          notification.payload;
+        const activeRoomId = collabAPI?.getRoomId() ?? null;
+
+        if (roomId && roomLink && roomId !== activeRoomId) {
+          pendingMentionFocusRef.current = { elementId, containerId };
+          await joinSharedRoomLink(roomLink);
+          if (focusCanvasElement(elementId, containerId)) {
+            pendingMentionFocusRef.current = null;
+          }
+          return;
+        }
+
+        if (!focusCanvasElement(elementId, containerId)) {
+          excalidrawAPI?.setToast({
+            message: "Mentioned element is no longer on this canvas.",
+            duration: 3000,
+            closable: true,
+          });
+        }
+      }
+    },
+    [collabAPI, excalidrawAPI, focusCanvasElement, joinSharedRoomLink],
   );
 
   // ---------------------------------------------------------------------------
@@ -1077,7 +1251,15 @@ const ExcalidrawWrapper = () => {
         viewModeEnabled={cloudScene?.role === "viewer" ? true : undefined}
         zenModeEnabled={cloudScene?.embed ? true : undefined}
         viewportStatusFrame={viewportStatusFrame}
-        userToFollow={userToFollow}
+        userToFollow={activeUserToFollow}
+        onUserFollow={
+          cloudScene
+            ? (payload) =>
+                cloudSession.setUserToFollow(
+                  payload.action === "FOLLOW" ? payload.userToFollow : null,
+                )
+            : undefined
+        }
         onChange={onChange}
         onExport={onExport}
         initialData={initialStatePromiseRef.current.promise}
@@ -1135,6 +1317,9 @@ const ExcalidrawWrapper = () => {
               <PlusTopRight />
 
               {collabError.message && <CollabError collabError={collabError} />}
+              <NotificationBell
+                onSelectNotification={handleSelectNotification}
+              />
               <LiveCollaborationTrigger
                 isCollaborating={isCollaborating}
                 onSelect={() =>
@@ -1231,6 +1416,10 @@ const ExcalidrawWrapper = () => {
         />
 
         <AppSidebar />
+        <NotificationToastStack
+          onSelectNotification={handleSelectNotification}
+        />
+        <CanvasMentionAutocomplete />
 
         {errorMessage && (
           <ErrorDialog onClose={() => setErrorMessage("")}>
@@ -1300,6 +1489,21 @@ const ExcalidrawWrapper = () => {
               ],
               perform: async () => {
                 setShareDialogState({ isOpen: true, type: "share" });
+              },
+            },
+            {
+              label: "Notifications",
+              category: DEFAULT_CATEGORIES.app,
+              predicate: true,
+              keywords: [
+                "notifications",
+                "alerts",
+                "mentions",
+                "inbox",
+                "share",
+              ],
+              perform: () => {
+                setNotificationCenterOpen(true);
               },
             },
             {

@@ -1,12 +1,17 @@
 import { getClientColor } from "@excalidraw/excalidraw/clients";
+import { CollaboratorProfilePopover } from "@excalidraw/excalidraw/components/CollaboratorProfilePopover";
+import { eyeIcon } from "@excalidraw/excalidraw/components/icons";
 import clsx from "clsx";
 
-import type { SocketId } from "@excalidraw/excalidraw/types";
+import type { Collaborator, SocketId } from "@excalidraw/excalidraw/types";
 
 import { useAtomValue, useSetAtom } from "../../app-jotai";
+import { cloudSession } from "../cloud";
 import {
+  cloudCollaboratorsAtom,
   cloudSceneAtom,
   cloudStatusAtom,
+  cloudUserToFollowAtom,
   mentionsUnreadAtom,
   participantsAtom,
   plusDialogAtom,
@@ -53,6 +58,8 @@ const StatusPill = () => {
 const Participants = () => {
   const participants = useAtomValue(participantsAtom);
   const user = useAtomValue(plusUserAtom);
+  const collaborators = useAtomValue(cloudCollaboratorsAtom);
+  const userToFollow = useAtomValue(cloudUserToFollowAtom);
   // one avatar per person, even with several tabs open
   const people = new Map<string, typeof participants[number]>();
   for (const participant of participants) {
@@ -73,26 +80,61 @@ const Participants = () => {
       className="plus-participants"
       aria-label={`${others.length} others here`}
     >
-      {others.slice(0, 4).map((participant) => (
-        <span
-          key={participant.connectionId}
-          className={clsx("plus-avatar small", {
-            speaking: participant.inHangout,
-          })}
-          // the same colour the editor gives this person's cursor
-          style={{
-            background: getClientColor(participant.connectionId as SocketId, {
-              id: participant.userId ?? participant.connectionId,
-            }),
-            color: "#1e1e1e",
-          }}
-          title={`${participant.name}${
-            participant.inHangout ? " (in voice)" : ""
-          }${participant.sharingScreen ? " (sharing screen)" : ""}`}
-        >
-          {initials(participant.name)}
-        </span>
-      ))}
+      {others.slice(0, 4).map((participant) => {
+        const socketId = participant.connectionId as SocketId;
+        const tracked = collaborators.get(socketId);
+        const collaborator: Collaborator = {
+          ...tracked,
+          id: participant.userId ?? participant.connectionId,
+          socketId,
+          username: participant.name,
+          isInCall: participant.inHangout,
+        };
+        const isBeingFollowed =
+          userToFollow?.socketId === participant.connectionId;
+
+        return (
+          <CollaboratorProfilePopover
+            key={participant.connectionId}
+            collaborator={collaborator}
+            socketId={socketId}
+            isBeingFollowed={isBeingFollowed}
+            onToggleFollow={() =>
+              cloudSession.setUserToFollow(
+                isBeingFollowed
+                  ? null
+                  : { socketId, username: participant.name },
+              )
+            }
+          >
+            <button
+              type="button"
+              className={clsx("plus-avatar small plus-avatar-button", {
+                speaking: participant.inHangout,
+                "is-followed": isBeingFollowed,
+              })}
+              // the same colour the editor gives this person's cursor
+              style={{
+                background: getClientColor(socketId, {
+                  id: participant.userId ?? participant.connectionId,
+                }),
+                color: "#1e1e1e",
+              }}
+              title={`${participant.name}${
+                participant.inHangout ? " (in voice)" : ""
+              }${participant.sharingScreen ? " (sharing screen)" : ""}`}
+              aria-label={`${participant.name} profile`}
+            >
+              {initials(participant.name)}
+              {isBeingFollowed && (
+                <span className="plus-avatar__follow-badge" aria-hidden="true">
+                  {eyeIcon}
+                </span>
+              )}
+            </button>
+          </CollaboratorProfilePopover>
+        );
+      })}
       {others.length > 4 && (
         <span className="plus-avatar small more">+{others.length - 4}</span>
       )}

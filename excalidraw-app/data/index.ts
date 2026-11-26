@@ -25,6 +25,8 @@ import type {
   AppState,
   BinaryFileData,
   BinaryFiles,
+  CollaboratorActivity,
+  CollaboratorPointer,
   SocketId,
 } from "@excalidraw/excalidraw/types";
 import type { MakeBrand } from "@excalidraw/common/utility-types";
@@ -39,6 +41,7 @@ import { encodeFilesForUpload } from "./FileManager";
 import { saveFilesToFirebase } from "./firebase";
 
 import type { WS_SUBTYPES } from "../app_constants";
+import type { AppNotification } from "../notifications/types";
 
 export type SyncableExcalidrawElement = OrderedExcalidrawElement &
   MakeBrand<"SyncableExcalidrawElement">;
@@ -96,10 +99,11 @@ export type SocketUpdateDataSource = {
     type: WS_SUBTYPES.MOUSE_LOCATION;
     payload: {
       socketId: SocketId;
-      pointer: { x: number; y: number; tool: "pointer" | "laser" };
+      pointer: CollaboratorPointer;
       button: "down" | "up";
       selectedElementIds: AppState["selectedElementIds"];
       username: string;
+      activity?: CollaboratorActivity;
     };
   };
   USER_VISIBLE_SCENE_BOUNDS: {
@@ -116,6 +120,12 @@ export type SocketUpdateDataSource = {
       socketId: SocketId;
       userState: UserIdleState;
       username: string;
+    };
+  };
+  NOTIFICATION: {
+    type: WS_SUBTYPES.NOTIFICATION;
+    payload: {
+      notification: AppNotification;
     };
   };
 };
