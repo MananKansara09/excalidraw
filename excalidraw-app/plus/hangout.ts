@@ -4,11 +4,13 @@ import { plusAPI } from "./api";
 import { cloudSession } from "./cloud";
 import { connectionIdAtom, participantsAtom } from "./state";
 
+import type { Participant } from "./state";
 import type { SignalMessage } from "./cloud";
 
 /**
- * Voice hangouts and screen sharing on a cloud scene: a WebRTC mesh between
- * everyone in the hangout, signaled through the scene's event stream. Uses
+ * The talk on a cloud scene: voice, cameras, screen sharing and chat between
+ * everyone who joined it. Only people in the talk hear, see and chat; it's a
+ * WebRTC mesh signaled through the scene's event stream. Uses
  * the "perfect negotiation" pattern so either side can add or remove tracks
  * (e.g. start a screen share) at any time.
  */
@@ -20,15 +22,32 @@ export type HangoutState = {
   micOn: boolean;
   muted: boolean;
   sharingScreen: boolean;
+  cameraOn: boolean;
   error: string | null;
-  /** Remote media by connection id. */
-  remote: Record<
-    string,
-    { audio: MediaStream | null; screen: MediaStream | null }
-  >;
-  /** Our own screen share, for the local preview. */
+  /**
+   * Remote media by connection id. Videos are camera or screen; which is which
+   * comes from the presence list (see `classifyVideos`).
+   */
+  remote: Record<string, { audio: MediaStream | null; videos: MediaStream[] }>;
+  /** Our own screen share and camera, for the local preview. */
   localScreen: MediaStream | null;
+  localCamera: MediaStream | null;
 };
+
+export type ChatMessage = {
+  id: string;
+  from: string;
+  name: string;
+  text: string;
+  at: number;
+};
+
+/** Messages of the talk you're in; they go away when you leave. */
+export const chatAtom = atom<ChatMessage[]>([]);
+export const chatOpenAtom = atom(false);
+export const chatUnreadAtom = atom(0);
+
+const MAX_CHAT_MESSAGES = 200;
 
 const initialState: HangoutState = {
   joined: false,
@@ -36,9 +55,11 @@ const initialState: HangoutState = {
   micOn: false,
   muted: false,
   sharingScreen: false,
+  cameraOn: false,
   error: null,
   remote: {},
   localScreen: null,
+  localCamera: null,
 };
 
 export const hangoutAtom = atom<HangoutState>(initialState);
@@ -88,12 +109,14 @@ type Peer = {
   makingOffer: boolean;
   ignoreOffer: boolean;
   screenSender: RTCRtpSender | null;
+  cameraSender: RTCRtpSender | null;
 };
 
 class Hangout {
   private peers = new Map<string, Peer>();
   private microphone: MediaStream | null = null;
   private screen: MediaStream | null = null;
+  private camera: MediaStream | null = null;
   private unsubscribe: (() => void) | null = null;
   private iceServers: RTCIceServer[] = DEFAULT_ICE_SERVERS;
 
@@ -113,11 +136,28 @@ class Hangout {
       delete remote[peerId];
     } else {
       remote[peerId] = {
-        ...(remote[peerId] ?? { audio: null, screen: null }),
+        ...(remote[peerId] ?? { audio: null, videos: [] }),
         ...patch,
       };
     }
     this.set({ remote });
+  }
+
+  private addRemoteVideo(peerId: string, stream: MediaStream) {
+    const videos = appJotaiStore.get(hangoutAtom).remote[peerId]?.videos ?? [];
+    if (!videos.some((video) => video.id === stream.id)) {
+      this.setRemote(peerId, { videos: [...videos, stream] });
+    }
+  }
+
+  /** Drops one video (by stream id), or all of a peer's when none is given. */
+  private removeRemoteVideo(peerId: string, streamId?: string) {
+    const videos = appJotaiStore.get(hangoutAtom).remote[peerId]?.videos;
+    if (videos?.length) {
+      this.setRemote(peerId, {
+        videos: streamId ? videos.filter((video) => video.id !== streamId) : [],
+      });
+    }
   }
 
   isJoined() {
@@ -172,9 +212,14 @@ class Hangout {
     this.peers.clear();
     this.microphone?.getTracks().forEach((track) => track.stop());
     this.screen?.getTracks().forEach((track) => track.stop());
+    this.camera?.getTracks().forEach((track) => track.stop());
     this.microphone = null;
     this.screen = null;
+    this.camera = null;
     appJotaiStore.set(hangoutAtom, initialState);
+    appJotaiStore.set(chatAtom, []);
+    appJotaiStore.set(chatOpenAtom, false);
+    appJotaiStore.set(chatUnreadAtom, 0);
     cloudSession.signal("hangout-leave").catch(() => {});
   }
 
@@ -228,7 +273,9 @@ class Hangout {
       peer.screenSender = peer.pc.addTrack(track, this.screen);
     }
     this.set({ sharingScreen: true, localScreen: this.screen });
-    cloudSession.signal("screen-share-start").catch(() => {});
+    cloudSession
+      .signal("screen-share-start", { streamId: this.screen.id })
+      .catch(() => {});
   }
 
   stopScreenShare() {
@@ -247,6 +294,85 @@ class Hangout {
     cloudSession.signal("screen-share-stop").catch(() => {});
   }
 
+  async startCamera() {
+    if (!this.isJoined() || this.camera) {
+      return;
+    }
+    try {
+      this.camera = await navigator.mediaDevices.getUserMedia({
+        video: {
+          width: { ideal: 640 },
+          height: { ideal: 360 },
+          frameRate: { ideal: 24 },
+        },
+        audio: false,
+      });
+    } catch (error: any) {
+      this.set({
+        error:
+          error?.name === "NotAllowedError"
+            ? "Camera access was blocked. Allow it in your browser to share video."
+            : "Couldn't start your camera.",
+      });
+      return;
+    }
+    if (!this.isJoined()) {
+      // left while the permission prompt was open
+      this.camera.getTracks().forEach((track) => track.stop());
+      this.camera = null;
+      return;
+    }
+    const camera = this.camera;
+    const [track] = camera.getVideoTracks();
+    // unplugging the camera or the browser's own indicator ends the track
+    track.addEventListener("ended", () => {
+      if (this.camera === camera) {
+        this.stopCamera();
+      }
+    });
+    for (const peer of this.peers.values()) {
+      peer.cameraSender = peer.pc.addTrack(track, camera);
+    }
+    this.set({ cameraOn: true, localCamera: camera, error: null });
+    cloudSession
+      .signal("camera-start", { streamId: camera.id })
+      .catch(() => {});
+  }
+
+  stopCamera() {
+    if (!this.camera) {
+      return;
+    }
+    const camera = this.camera;
+    this.camera = null;
+    for (const peer of this.peers.values()) {
+      if (peer.cameraSender) {
+        peer.pc.removeTrack(peer.cameraSender);
+        peer.cameraSender = null;
+      }
+    }
+    camera.getTracks().forEach((track) => track.stop());
+    this.set({ cameraOn: false, localCamera: null });
+    cloudSession.signal("camera-stop", { streamId: camera.id }).catch(() => {});
+  }
+
+  toggleCamera() {
+    return this.camera ? this.stopCamera() : this.startCamera();
+  }
+
+  /** Sends a chat message to everyone in the talk. */
+  async sendChat(text: string) {
+    const trimmed = text.trim();
+    if (!this.isJoined() || !trimmed) {
+      return;
+    }
+    try {
+      await cloudSession.signal("chat", { text: trimmed.slice(0, 1000) });
+    } catch {
+      this.set({ error: "Couldn't send your message." });
+    }
+  }
+
   private getPeer(peerId: string): Peer {
     const existing = this.peers.get(peerId);
     if (existing) {
@@ -262,6 +388,7 @@ class Hangout {
       makingOffer: false,
       ignoreOffer: false,
       screenSender: null,
+      cameraSender: null,
     };
     this.peers.set(peerId, peer);
 
@@ -288,14 +415,8 @@ class Hangout {
       if (track.kind === "audio") {
         this.setRemote(peerId, { audio: stream });
       } else {
-        this.setRemote(peerId, { screen: stream });
-        const clear = () => {
-          if (
-            appJotaiStore.get(hangoutAtom).remote[peerId]?.screen === stream
-          ) {
-            this.setRemote(peerId, { screen: null });
-          }
-        };
+        this.addRemoteVideo(peerId, stream);
+        const clear = () => this.removeRemoteVideo(peerId, stream.id);
         track.addEventListener("ended", clear);
         stream.addEventListener("removetrack", clear);
       }
@@ -319,7 +440,14 @@ class Hangout {
         this.screen.getVideoTracks()[0],
         this.screen,
       );
-    } else {
+    }
+    if (this.camera) {
+      peer.cameraSender = pc.addTrack(
+        this.camera.getVideoTracks()[0],
+        this.camera,
+      );
+    }
+    if (!this.screen && !this.camera) {
       pc.addTransceiver("video", { direction: "recvonly" });
     }
     return peer;
@@ -340,8 +468,27 @@ class Hangout {
         this.closePeer(message.from);
         return;
       case "screen-share-stop":
-        this.setRemote(message.from, { screen: null });
+      case "camera-stop":
+        this.removeRemoteVideo(message.from, message.data?.streamId);
         return;
+      case "chat": {
+        const chat = message.data as Omit<ChatMessage, "from">;
+        const me = appJotaiStore.get(connectionIdAtom);
+        appJotaiStore.set(
+          chatAtom,
+          [
+            ...appJotaiStore.get(chatAtom),
+            { ...chat, from: message.from },
+          ].slice(-MAX_CHAT_MESSAGES),
+        );
+        if (message.from !== me && !appJotaiStore.get(chatOpenAtom)) {
+          appJotaiStore.set(
+            chatUnreadAtom,
+            appJotaiStore.get(chatUnreadAtom) + 1,
+          );
+        }
+        return;
+      }
       case "rtc-offer":
       case "rtc-answer": {
         const description = message.data as RTCSessionDescriptionInit;
@@ -387,3 +534,30 @@ class Hangout {
 }
 
 export const hangout = new Hangout();
+
+/**
+ * Splits the remote videos into cameras and screens. The presence list says
+ * which stream is which, so this works for people who joined late too.
+ */
+export const classifyVideos = (
+  remote: HangoutState["remote"],
+  participants: Participant[],
+) => {
+  const cameras: { id: string; stream: MediaStream }[] = [];
+  const screens: { id: string; stream: MediaStream }[] = [];
+  for (const [id, media] of Object.entries(remote)) {
+    const participant = participants.find((p) => p.connectionId === id);
+    for (const stream of media.videos) {
+      if (participant?.cameraStreamId === stream.id) {
+        cameras.push({ id, stream });
+      } else if (
+        participant?.screenStreamId === stream.id ||
+        // a client from before streams were labelled: its one video is a screen
+        (participant?.sharingScreen && !participant.screenStreamId)
+      ) {
+        screens.push({ id, stream });
+      }
+    }
+  }
+  return { cameras, screens };
+};

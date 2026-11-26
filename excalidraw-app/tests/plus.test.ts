@@ -1,4 +1,10 @@
 import { safeNextURL } from "../plus/auth";
+import {
+  AVATAR_STYLES,
+  AVATAR_THEMES,
+  generateAvatarDataURL,
+  getAvatarPresets,
+} from "../plus/avatar";
 import { parseCloudHash } from "../plus/cloud";
 import { getOrderedFrames } from "../plus/export/frames";
 import { createPdf } from "../plus/export/pdf";
@@ -172,5 +178,39 @@ describe("safeNextURL", () => {
     ]) {
       expect(safeNextURL(unsafe)).toBe("/");
     }
+  });
+});
+
+describe("avatar generator", () => {
+  it("creates valid SVG data URLs for all styles and themes", () => {
+    for (const style of AVATAR_STYLES) {
+      const url = generateAvatarDataURL({
+        style: style.id,
+        themeId: AVATAR_THEMES[0].id,
+        seed: 42,
+        name: "Manan Kansara",
+      });
+      expect(url.startsWith("data:image/svg+xml;charset=utf-8,")).toBe(true);
+      const svg = decodeURIComponent(
+        url.slice("data:image/svg+xml;charset=utf-8,".length),
+      );
+      expect(svg).toContain("<svg");
+      expect(svg).not.toContain("<script");
+    }
+
+    const mono = generateAvatarDataURL({
+      style: "monogram",
+      themeId: "sunset",
+      seed: 1,
+      name: "Manan <Kansara>",
+    });
+    const monoSvg = decodeURIComponent(
+      mono.slice("data:image/svg+xml;charset=utf-8,".length),
+    );
+    expect(monoSvg).toContain("M&lt;");
+
+    const presets = getAvatarPresets("Ada Lovelace");
+    expect(presets.length).toBe(12);
+    expect(new Set(presets.map((p) => p.url)).size).toBe(12);
   });
 });

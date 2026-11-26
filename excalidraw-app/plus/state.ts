@@ -1,3 +1,9 @@
+import type {
+  Collaborator,
+  SocketId,
+  UserToFollow,
+} from "@excalidraw/excalidraw/types";
+
 import { atom } from "../app-jotai";
 
 import type { PlusComment, PlusUser, SceneRole } from "./api";
@@ -24,6 +30,8 @@ export type CloudScene = {
   shareToken: string | null;
   /** Rendered inside an iframe embed: view-only, no chrome. */
   embed: boolean;
+  /** Opened through a presentation link: only the slides, nothing else. */
+  slidesOnly: boolean;
 };
 
 export const cloudSceneAtom = atom<CloudScene | null>(null);
@@ -41,13 +49,26 @@ export type Participant = {
   connectionId: string;
   userId: string | null;
   name: string;
+  avatarUrl?: string | null;
   color: string;
   inHangout: boolean;
   sharingScreen: boolean;
+  cameraOn: boolean;
+  /** Which of their media streams is the camera / the screen. */
+  cameraStreamId: string | null;
+  screenStreamId: string | null;
+  /** Running a presentation, currently on slide `slide`. */
+  presenting: boolean;
+  slide: number;
 };
 
 export const participantsAtom = atom<Participant[]>([]);
 export const connectionIdAtom = atom<string | null>(null);
+export const cloudCollaboratorsAtom = atom<Map<SocketId, Collaborator>>(
+  new Map(),
+);
+export const cloudUserToFollowAtom = atom<UserToFollow | null>(null);
+export const cloudFollowedActivityAtom = atom<string | null>(null);
 
 export const commentsAtom = atom<PlusComment[]>([]);
 /** Comment thread highlighted from a canvas pin. */
@@ -56,6 +77,8 @@ export const activeCommentIdAtom = atom<string | null>(null);
 export const presentationAtom = atom<{
   active: boolean;
   index: number;
+  /** Watching someone else's presentation instead of driving one. */
+  watching?: boolean;
 }>({ active: false, index: 0 });
 
 /** Frame order for presenting scenes that aren't in the cloud. */

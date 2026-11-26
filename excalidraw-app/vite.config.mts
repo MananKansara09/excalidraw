@@ -151,15 +151,24 @@ export default defineConfig(({ mode }) => {
       open: true,
       // Excalidraw Plus server (plus-server/), same-origin so its session
       // cookie works: `yarn start:plus-server`
-      proxy: Object.fromEntries(
-        ["/api", "/mcp"].map((prefix) => [
-          prefix,
-          {
-            target: envVars.VITE_APP_PLUS_SERVER_URL || "http://localhost:3015",
-            changeOrigin: true,
-          },
-        ]),
-      ),
+      proxy: {
+        ...Object.fromEntries(
+          ["/api", "/mcp"].map((prefix) => [
+            prefix,
+            {
+              target:
+                envVars.VITE_APP_PLUS_SERVER_URL || "http://localhost:3015",
+              changeOrigin: true,
+              // the scene realtime channel is a WebSocket
+              ws: true,
+            },
+          ]),
+        ),
+        // local Claude bridge (claude-bridge/): `yarn start:claude-bridge`
+        "/claude-bridge": {
+          target: envVars.VITE_APP_CLAUDE_BRIDGE_URL || "http://127.0.0.1:3016",
+        },
+      },
     },
     // We need to specify the envDir since now there are no
     //more located in parallel with the vite.config.ts file but in parent dir

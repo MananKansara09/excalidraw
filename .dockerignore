@@ -9,6 +9,7 @@
 !public/
 !packages/
 !plus-server/
+!claude-bridge/
 !scripts/
 !tsconfig.json
 !yarn.lock

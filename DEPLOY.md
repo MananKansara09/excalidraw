@@ -1,6 +1,6 @@
 # Deploying Excalidraw with the Plus server
 
-This deploys the app together with `plus-server/` (cloud scenes, sharing, teams, comments, presentations, voice, AI, REST API and MCP). One container serves the app and the API on `127.0.0.1:3015`; the Caddy already running on your server proxies your domain to it and handles HTTPS.
+This deploys the app together with `plus-server/` (cloud scenes, sharing, teams, comments, presentations, voice, AI, REST API and MCP). One container serves the app and the API on `127.0.0.1:3015`, and a second one (`room`, [excalidraw-room](https://github.com/excalidraw/excalidraw-room)) relays live collaboration on `127.0.0.1:3002`; the Caddy already running on your server proxies your domain to it and handles HTTPS.
 
 HTTPS is required, not optional: browsers allow the microphone and screen sharing only on secure origins, and the session cookie is marked `Secure`.
 
@@ -30,7 +30,7 @@ HTTPS is required, not optional: browsers allow the microphone and screen sharin
    openssl rand -base64 32
    ```
 
-   Edit `.env.plus`: set `DOMAIN` to your domain (and `PLUS_PORT` if 3015 is taken on the server) and paste the random string into `PLUS_SECRET`. Optionally set `ANTHROPIC_API_KEY` so every user gets 100 AI requests a day; without it, users can still add their own key in Account settings. Keep `PLUS_SECRET` stable: changing it makes stored AI keys unreadable. Never commit `.env.plus` (it's gitignored).
+   Edit `.env.plus`: set `DOMAIN` to your domain (and `PLUS_PORT` if 3015 is taken on the server) and paste a random string into `PLUS_SECRET` and another into `CLAUDE_BRIDGE_SECRET` (see [Claude chat](#claude-chat)). Optionally set `ANTHROPIC_API_KEY` so every user gets 100 AI requests a day; without it, users can still add their own key in Account settings. Keep `PLUS_SECRET` stable: changing it makes stored AI keys unreadable. Never commit `.env.plus` (it's gitignored).
 
 3. Build and start:
 
@@ -50,7 +50,7 @@ HTTPS is required, not optional: browsers allow the microphone and screen sharin
    curl http://127.0.0.1:3015/api/health
    ```
 
-4. Point Caddy at it. Add the site block from `Caddyfile.plus` to your Caddyfile (usually `/etc/caddy/Caddyfile`), replacing `draw.example.com` with your domain (and the port, if you changed `PLUS_PORT`). Keep the `flush_interval -1` line and the `encode` match list: they stop Caddy from buffering or compressing the event streams that live sync and voice use. Then check and reload:
+4. Point Caddy at it. Add the site block from `Caddyfile.plus` to your Caddyfile (usually `/etc/caddy/Caddyfile`), replacing `draw.example.com` with your domain (and the ports, if you changed `PLUS_PORT` or `ROOM_PORT`). The `/socket.io/*` block is what live collaboration connects through. Keep the `flush_interval -1` line and the `encode` match list: they stop Caddy from buffering or compressing the event streams that live sync and voice use. Then check and reload:
 
    ```bash
    caddy validate --config /etc/caddy/Caddyfile
@@ -100,6 +100,18 @@ Use two browsers, or one normal and one private window:
     ```bash
     claude mcp add --transport http excalidraw https://draw.example.com/mcp --header "Authorization: Bearer exk_..."
     ```
+
+## Claude chat
+
+The in-app **Claude** panel lets people create diagrams by chatting. It is powered by the `claude-bridge` service in the same compose file (it starts with everything else, no extra step beyond `CLAUDE_BRIDGE_SECRET`).
+
+- **Each user signs in to their own Claude account**, from the panel: _Sign in with Claude_, approve on claude.ai, paste the code back. Their login is stored in a private per-user directory on the `claude-data` volume, so usage counts against their own plan. There is no shared Claude account or key.
+- Users must be signed in to your Excalidraw Plus account first; the Plus server passes the user's identity to the bridge. The bridge isn't published on any port.
+- Claude gets no file or shell access, only tools that draw on the canvas.
+- Back up `claude-data` if you don't want users to reconnect after a rebuild. Users can disconnect from the panel (door icon).
+- `docker compose ... logs claude-bridge` shows problems; `CLAUDE_BRIDGE_MAX_CONCURRENT` limits simultaneous chats.
+
+For local development (no Docker), see `claude-bridge/README.md`.
 
 ## Operating it
 
@@ -205,6 +217,7 @@ Run a single instance: realtime state (presence, voice signaling) lives in the s
 | Symptom | Cause and fix |
 | --- | --- |
 | Caddy logs certificate errors | DNS doesn't point at the server yet, or port 80 is blocked. Fix it and run `sudo systemctl reload caddy`. |
+| Live collaboration doesn't connect | The `room` container isn't running, Caddy lacks the `/socket.io/*` block, or the app was built for another domain (rebuild after changing `DOMAIN`). |
 | `502 Bad Gateway` from Caddy | The container isn't running or uses another port: check `docker compose ... ps` and that the `reverse_proxy` port matches `PLUS_PORT`. |
 | Top bar shows **Offline**, edits don't appear in other windows | Event streams are being buffered: the Caddy site block lacks `flush_interval -1` or compresses `text/event-stream`, or another proxy (e.g. Cloudflare) buffers them. The smoke test's event stream check confirms the fix. |
 | Signed in, but reloading signs you out | The site isn't on HTTPS while `PLUS_SECURE_COOKIES=true`. Use the HTTPS URL. |

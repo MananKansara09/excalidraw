@@ -25,7 +25,12 @@ export const fakeAI = (
 };
 
 export const startTestServer = async (
-  opts: { ai?: AIProvider; aiDailyLimit?: number; staticDir?: string } = {},
+  opts: {
+    ai?: AIProvider;
+    aiDailyLimit?: number;
+    staticDir?: string;
+    claudeBridge?: { url: string; secret: string };
+  } = {},
 ) => {
   const ai = opts.ai ?? fakeAI();
   const { server, ctx } = createApp({
@@ -38,6 +43,7 @@ export const startTestServer = async (
       aiAnonymousDailyLimit: 2,
       secureCookies: false,
       publicUrl: "http://app.test",
+      claudeBridge: opts.claudeBridge ?? null,
     },
   });
   await new Promise<void>((resolve) => server.listen(0, resolve));
