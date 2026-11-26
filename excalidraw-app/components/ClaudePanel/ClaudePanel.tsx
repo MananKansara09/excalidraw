@@ -3,10 +3,20 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 
-import { checkBridge, streamChat } from "./claudeBridge";
+import { goToSignIn } from "../../plus/auth";
+
+import {
+  disconnect,
+  getStatus,
+  startLogin,
+  streamChat,
+  submitLoginCode,
+} from "./claudeBridge";
 import { applyOp, summarizeScene } from "./sceneOps";
 
 import "./ClaudePanel.scss";
+
+import type { BridgeStatus } from "./claudeBridge";
 
 type Dock = "right" | "bottom";
 type Size = "small" | "large";
@@ -67,6 +77,93 @@ const Icon = ({ d }: { d: string }) => (
 const SPARK =
   "M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3zM19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15z";
 
+/** sign-in to the user's own Claude account: open the link, paste the code */
+const ConnectCard = ({ onConnected }: { onConnected: () => void }) => {
+  const [url, setUrl] = useState<string | null>(null);
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const begin = async () => {
+    setBusy(true);
+    setError("");
+    // open synchronously so the popup isn't blocked, point it once we have the URL
+    const popup = window.open("", "_blank");
+    try {
+      const authUrl = await startLogin();
+      setUrl(authUrl);
+      if (popup) {
+        popup.location.href = authUrl;
+      }
+    } catch (e: any) {
+      popup?.close();
+      setError(e.message);
+    }
+    setBusy(false);
+  };
+
+  const finish = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      await submitLoginCode(code.trim());
+      onConnected();
+    } catch (e: any) {
+      setError(e.message);
+      // a malformed code keeps the pending login; only restart when told to
+      if (/start again/i.test(e.message)) {
+        setUrl(null);
+        setCode("");
+      }
+    }
+    setBusy(false);
+  };
+
+  return (
+    <div className="claude-connect">
+      <div className="claude-empty-logo">
+        <Icon d={SPARK} />
+      </div>
+      <h3>Connect your Claude account</h3>
+      <p>
+        Claude uses <b>your own</b> Claude subscription. You only do this once.
+      </p>
+      {!url ? (
+        <button className="claude-primary" onClick={begin} disabled={busy}>
+          {busy ? "Starting…" : "Sign in with Claude"}
+        </button>
+      ) : (
+        <ol className="claude-steps">
+          <li>
+            <a href={url} target="_blank" rel="noopener noreferrer">
+              Open the Claude sign-in page
+            </a>{" "}
+            and approve access.
+          </li>
+          <li>Copy the code it shows and paste it here:</li>
+          <li>
+            <input
+              value={code}
+              placeholder="Paste code…"
+              autoFocus
+              onChange={(e) => setCode(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && code.trim() && finish()}
+            />
+            <button
+              className="claude-primary"
+              onClick={finish}
+              disabled={busy || !code.trim()}
+            >
+              {busy ? "Connecting…" : "Connect"}
+            </button>
+          </li>
+        </ol>
+      )}
+      {error && <div className="claude-connect-error">{error}</div>}
+    </div>
+  );
+};
+
 export const ClaudePanel = ({
   excalidrawAPI,
   theme,
@@ -79,7 +176,8 @@ export const ClaudePanel = ({
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
-  const [bridgeUp, setBridgeUp] = useState<boolean | null>(null);
+  const [status, setStatus] = useState<BridgeStatus | null>(null);
+  const ready = status?.state === "ok" && status.loggedIn;
   const sessionId = useRef<string | undefined>(undefined);
   const abortRef = useRef<AbortController | null>(null);
   const nextId = useRef(1);
@@ -102,19 +200,22 @@ export const ClaudePanel = ({
     }
     let cancelled = false;
     const poll = async () => {
-      const up = await checkBridge();
+      const next = await getStatus();
       if (!cancelled) {
-        setBridgeUp(up);
+        setStatus(next);
       }
     };
     poll();
-    // keep retrying while offline so it flips green once the bridge starts
-    const id = window.setInterval(() => bridgeUp !== true && poll(), 3000);
+    // keep retrying while the bridge is down so it recovers on its own
+    const id = window.setInterval(
+      () => (!status || status.state === "offline") && poll(),
+      3000,
+    );
     return () => {
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [open, bridgeUp]);
+  }, [open, status]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({
@@ -155,7 +256,7 @@ export const ClaudePanel = ({
 
   const send = async (text: string) => {
     const message = text.trim();
-    if (!message || busy) {
+    if (!message || busy || !ready) {
       return;
     }
     setInput("");
@@ -180,9 +281,16 @@ export const ClaudePanel = ({
         onTool: (name) =>
           patchLast((m) => ({ ...m, tools: [...m.tools, name] })),
         onOps: (op) => applyOp(excalidrawAPI, op),
-        onError: (msg) => {
-          if (/can't reach/i.test(msg)) {
-            setBridgeUp(false);
+        onError: (msg, code) => {
+          if (code === "offline") {
+            setStatus({ state: "offline" });
+          } else if (code === "signin_required") {
+            setStatus({ state: "signin_required" });
+          } else if (
+            code === "authentication_failed" ||
+            code === "oauth_org_not_allowed"
+          ) {
+            setStatus({ state: "ok", loggedIn: false, email: null });
           }
           patchLast((m) => ({ ...m, text: msg, error: true }));
         },
@@ -195,6 +303,14 @@ export const ClaudePanel = ({
   };
 
   const stop = () => abortRef.current?.abort();
+
+  const signOutOfClaude = async () => {
+    stop();
+    await disconnect();
+    sessionId.current = undefined;
+    setMessages([]);
+    setStatus(await getStatus());
+  };
 
   const reset = () => {
     stop();
@@ -237,15 +353,19 @@ export const ClaudePanel = ({
             <strong>Claude</strong>
             <small
               className={clsx("claude-status", {
-                up: bridgeUp === true,
-                down: bridgeUp === false,
+                up: ready,
+                down: status?.state === "offline",
               })}
             >
-              {bridgeUp === null
+              {!status
                 ? "connecting…"
-                : bridgeUp
-                ? "your Claude Code login"
-                : "bridge offline"}
+                : status.state === "offline"
+                ? "bridge offline"
+                : status.state === "signin_required"
+                ? "sign in required"
+                : status.loggedIn
+                ? status.email || "your Claude account"
+                : "not connected"}
             </small>
           </div>
         </div>
@@ -285,6 +405,11 @@ export const ClaudePanel = ({
               }
             />
           </button>
+          {ready && (
+            <button title="Disconnect Claude account" onClick={signOutOfClaude}>
+              <Icon d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" />
+            </button>
+          )}
           <button title="Close" onClick={() => updatePrefs({ open: false })}>
             <Icon d="M6 6l12 12M18 6L6 18" />
           </button>
@@ -292,20 +417,35 @@ export const ClaudePanel = ({
       </header>
 
       <div className="claude-messages" ref={scrollRef}>
-        {bridgeUp === false && (
+        {status?.state === "offline" && (
           <div className="claude-banner">
-            <strong>Start the local bridge</strong>
+            <strong>Claude bridge isn't running</strong>
             <p>
-              Claude runs on your own machine using your Claude Code login. In a
-              terminal:
+              Self-hosted? Make sure the <code>claude-bridge</code> service is
+              up. Running locally? In a terminal:
             </p>
             <code>cd claude-bridge && yarn install && yarn start</code>
-            <p>
-              Not signed in yet? Run <code>claude login</code> first.
-            </p>
           </div>
         )}
-        {!messages.length && (
+        {status?.state === "signin_required" && (
+          <div className="claude-connect">
+            <div className="claude-empty-logo">
+              <Icon d={SPARK} />
+            </div>
+            <h3>Sign in to use Claude</h3>
+            <p>Sign in to your account first, then connect your Claude plan.</p>
+            <button
+              className="claude-primary"
+              onClick={() => goToSignIn("signin")}
+            >
+              Sign in
+            </button>
+          </div>
+        )}
+        {status?.state === "ok" && !status.loggedIn && (
+          <ConnectCard onConnected={async () => setStatus(await getStatus())} />
+        )}
+        {ready && !messages.length && (
           <div className="claude-empty">
             <div className="claude-empty-logo">
               <Icon d={SPARK} />
@@ -363,7 +503,10 @@ export const ClaudePanel = ({
           ref={inputRef}
           value={input}
           rows={1}
-          placeholder="Ask Claude to draw or edit…"
+          disabled={!ready}
+          placeholder={
+            ready ? "Ask Claude to draw or edit…" : "Connect Claude to start…"
+          }
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
             if (
@@ -386,7 +529,11 @@ export const ClaudePanel = ({
             <Icon d="M7 7h10v10H7z" />
           </button>
         ) : (
-          <button className="claude-send" disabled={!input.trim()} title="Send">
+          <button
+            className="claude-send"
+            disabled={!ready || !input.trim()}
+            title="Send"
+          >
             <Icon d="M5 12h14M13 6l6 6-6 6" />
           </button>
         )}

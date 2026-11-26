@@ -14,19 +14,72 @@ type Handlers = {
   onText: (delta: string) => void;
   onTool: (name: string) => void;
   onOps: (op: BridgeOp) => void;
-  onError: (message: string) => void;
+  onError: (message: string, code?: string) => void;
   onDone: () => void;
 };
 
 const BASE = "/claude-bridge";
 
-export const checkBridge = async (): Promise<boolean> => {
+export type BridgeStatus =
+  | { state: "ok"; loggedIn: boolean; email: string | null }
+  | { state: "signin_required" }
+  | { state: "offline" };
+
+const OFFLINE_MESSAGE =
+  "Can't reach the Claude bridge. Start it with `cd claude-bridge && yarn install && yarn start`.";
+
+const post = async (path: string, body?: unknown) => {
+  const res = await fetch(`${BASE}${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body ?? {}),
+  });
+  let json: any = null;
   try {
-    const res = await fetch(`${BASE}/health`, { cache: "no-store" });
-    return res.ok;
+    json = await res.json();
+  } catch {}
+  return { ok: res.ok, status: res.status, json };
+};
+
+export const getStatus = async (): Promise<BridgeStatus> => {
+  try {
+    const res = await fetch(`${BASE}/status`, { cache: "no-store" });
+    if (res.status === 401) {
+      return { state: "signin_required" };
+    }
+    if (!res.ok) {
+      return { state: "offline" };
+    }
+    const json = await res.json();
+    return {
+      state: "ok",
+      loggedIn: !!json.loggedIn,
+      email: json.email ?? null,
+    };
   } catch {
-    return false;
+    return { state: "offline" };
   }
+};
+
+/** starts `claude auth login`: returns the page the user must authorize on */
+export const startLogin = async (): Promise<string> => {
+  const { ok, json } = await post("/auth/login");
+  if (!ok || !json?.url) {
+    throw new Error(json?.error || "Couldn't start the Claude sign-in.");
+  }
+  return json.url;
+};
+
+/** completes the login with the code shown after authorizing */
+export const submitLoginCode = async (code: string) => {
+  const { ok, json } = await post("/auth/code", { code });
+  if (!ok) {
+    throw new Error(json?.error || "That code didn't work.");
+  }
+};
+
+export const disconnect = async () => {
+  await post("/auth/logout");
 };
 
 /** POSTs a chat turn and dispatches the server-sent events as they arrive */
@@ -47,17 +100,24 @@ export const streamChat = async (
     if (e?.name === "AbortError") {
       return;
     }
-    handlers.onError(
-      "Can't reach the Claude bridge. Start it with `cd claude-bridge && yarn install && yarn start`.",
-    );
+    handlers.onError(OFFLINE_MESSAGE, "offline");
     return;
   }
   if (!res.ok || !res.body) {
-    handlers.onError(
-      res.status === 404 || res.status >= 502
-        ? "Can't reach the Claude bridge. Start it with `cd claude-bridge && yarn install && yarn start`."
-        : `Bridge error (${res.status}).`,
-    );
+    if (res.status === 401) {
+      handlers.onError(
+        "Please sign in again to keep chatting.",
+        "signin_required",
+      );
+    } else if (res.status === 404 || res.status >= 502) {
+      handlers.onError(OFFLINE_MESSAGE, "offline");
+    } else {
+      let message = `Bridge error (${res.status}).`;
+      try {
+        message = (await res.json()).error || message;
+      } catch {}
+      handlers.onError(message);
+    }
     return;
   }
 
@@ -81,7 +141,7 @@ export const streamChat = async (
       case "ops":
         return handlers.onOps(data);
       case "error":
-        return handlers.onError(data.message);
+        return handlers.onError(data.message, data.code);
       case "done":
         return handlers.onDone();
     }

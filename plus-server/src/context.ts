@@ -17,6 +17,11 @@ export type ServerConfig = {
    * people on restrictive networks can connect.
    */
   iceServers?: unknown[];
+  /**
+   * Internal claude-bridge service that powers the in-app Claude chat. Set
+   * both to enable `/claude-bridge/*`.
+   */
+  claudeBridge?: { url: string; secret: string } | null;
 };
 
 export type AppContext = {

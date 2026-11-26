@@ -3,6 +3,7 @@ import { createReadStream, existsSync, statSync } from "node:fs";
 import { extname, join, normalize, resolve, sep } from "node:path";
 
 import { registerAIRoutes } from "./ai.ts";
+import { handleClaudeBridge } from "./claudeBridge.ts";
 import { createSecretBox, getUser } from "./auth.ts";
 import { Router, sendJSON } from "./http.ts";
 import { registerMCPRoutes } from "./mcp.ts";
@@ -160,6 +161,9 @@ export const createApp = (options: CreateAppOptions) => {
       }
     }
     try {
+      if (await handleClaudeBridge(ctx, req, res)) {
+        return;
+      }
       if (await router.handle(req, res)) {
         return;
       }

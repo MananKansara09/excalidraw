@@ -30,7 +30,7 @@ HTTPS is required, not optional: browsers allow the microphone and screen sharin
    openssl rand -base64 32
    ```
 
-   Edit `.env.plus`: set `DOMAIN` to your domain (and `PLUS_PORT` if 3015 is taken on the server) and paste the random string into `PLUS_SECRET`. Optionally set `ANTHROPIC_API_KEY` so every user gets 100 AI requests a day; without it, users can still add their own key in Account settings. Keep `PLUS_SECRET` stable: changing it makes stored AI keys unreadable. Never commit `.env.plus` (it's gitignored).
+   Edit `.env.plus`: set `DOMAIN` to your domain (and `PLUS_PORT` if 3015 is taken on the server) and paste a random string into `PLUS_SECRET` and another into `CLAUDE_BRIDGE_SECRET` (see [Claude chat](#claude-chat)). Optionally set `ANTHROPIC_API_KEY` so every user gets 100 AI requests a day; without it, users can still add their own key in Account settings. Keep `PLUS_SECRET` stable: changing it makes stored AI keys unreadable. Never commit `.env.plus` (it's gitignored).
 
 3. Build and start:
 
@@ -100,6 +100,18 @@ Use two browsers, or one normal and one private window:
     ```bash
     claude mcp add --transport http excalidraw https://draw.example.com/mcp --header "Authorization: Bearer exk_..."
     ```
+
+## Claude chat
+
+The in-app **Claude** panel lets people create diagrams by chatting. It is powered by the `claude-bridge` service in the same compose file (it starts with everything else, no extra step beyond `CLAUDE_BRIDGE_SECRET`).
+
+- **Each user signs in to their own Claude account**, from the panel: _Sign in with Claude_, approve on claude.ai, paste the code back. Their login is stored in a private per-user directory on the `claude-data` volume, so usage counts against their own plan. There is no shared Claude account or key.
+- Users must be signed in to your Excalidraw Plus account first; the Plus server passes the user's identity to the bridge. The bridge isn't published on any port.
+- Claude gets no file or shell access, only tools that draw on the canvas.
+- Back up `claude-data` if you don't want users to reconnect after a rebuild. Users can disconnect from the panel (door icon).
+- `docker compose ... logs claude-bridge` shows problems; `CLAUDE_BRIDGE_MAX_CONCURRENT` limits simultaneous chats.
+
+For local development (no Docker), see `claude-bridge/README.md`.
 
 ## Operating it
 
