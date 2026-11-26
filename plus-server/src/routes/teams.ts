@@ -27,7 +27,7 @@ const teamDetail = (ctx: AppContext, teamId: string, viewerRole: TeamRole) => {
     role: viewerRole,
     members: all<any>(
       ctx.db,
-      `SELECT users.id, users.name, users.email, team_members.role, team_members.created_at
+      `SELECT users.id, users.name, users.email, users.avatar_url, team_members.role, team_members.created_at
        FROM team_members JOIN users ON users.id = team_members.user_id
        WHERE team_members.team_id = ? ORDER BY team_members.created_at`,
       teamId,
@@ -35,6 +35,7 @@ const teamDetail = (ctx: AppContext, teamId: string, viewerRole: TeamRole) => {
       userId: member.id,
       name: member.name,
       email: member.email,
+      avatarUrl: member.avatar_url ?? null,
       role: member.role,
       joinedAt: member.created_at,
     })),

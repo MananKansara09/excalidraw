@@ -25,6 +25,51 @@ import type { Router } from "../http.ts";
 import type { User } from "../auth.ts";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MAX_AVATAR_DATA_URL_LENGTH = 300_000;
+const AVATAR_RASTER_RE =
+  /^data:image\/(?:png|jpeg|jpg|webp|gif);base64,[A-Za-z0-9+/=]+$/i;
+const AVATAR_SVG_RE =
+  /^data:image\/svg\+xml(?:;charset=utf-8)?(?:;base64,[A-Za-z0-9+/=]+|,[\s\S]+)$/i;
+
+const validateAvatarUrl = (value: unknown): string | null => {
+  if (value === null || value === "") {
+    return null;
+  }
+  if (typeof value !== "string") {
+    throw badRequest('"avatarUrl" must be a string or null');
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  if (trimmed.length > MAX_AVATAR_DATA_URL_LENGTH) {
+    throw badRequest("Avatar image is too large (max ~220 KB)");
+  }
+  if (AVATAR_RASTER_RE.test(trimmed)) {
+    return trimmed;
+  }
+  if (AVATAR_SVG_RE.test(trimmed)) {
+    let decoded = trimmed;
+    if (/;base64,/i.test(trimmed)) {
+      const payload = trimmed.slice(trimmed.indexOf(",") + 1);
+      decoded = Buffer.from(payload, "base64").toString("utf8");
+    } else {
+      try {
+        decoded = decodeURIComponent(trimmed.slice(trimmed.indexOf(",") + 1));
+      } catch {
+        // leave as raw
+      }
+    }
+    if (/<script\b|javascript:|on[a-z]+\s*=/i.test(decoded)) {
+      throw badRequest("Unsupported SVG avatar content");
+    }
+    return trimmed;
+  }
+  if (/^https?:\/\//i.test(trimmed) && trimmed.length <= 2048) {
+    return trimmed;
+  }
+  throw badRequest("Avatar must be an image data URL or HTTP(S) URL");
+};
 
 /** Moves pending team invites for this email into memberships. */
 const acceptPendingInvites = (ctx: AppContext, user: User) => {
@@ -154,6 +199,14 @@ export const registerAuthRoutes = (router: Router, ctx: AppContext) => {
         user.id,
       );
     }
+    if (body.avatarUrl !== undefined) {
+      run(
+        db,
+        "UPDATE users SET avatar_url = ? WHERE id = ?",
+        validateAvatarUrl(body.avatarUrl),
+        user.id,
+      );
+    }
     if (body.aiKey !== undefined) {
       const aiKey = optionalString(body.aiKey, "aiKey", { max: 500 });
       run(
@@ -184,10 +237,15 @@ export const registerAuthRoutes = (router: Router, ctx: AppContext) => {
         user.id,
       );
     }
+    const updated = get<User>(db, "SELECT * FROM users WHERE id = ?", user.id)!;
+    if (body.name !== undefined || body.avatarUrl !== undefined) {
+      ctx.hub.updateUser(user.id, {
+        name: updated.name,
+        avatarUrl: updated.avatar_url ?? null,
+      });
+    }
     return {
-      user: publicUser(
-        get<User>(db, "SELECT * FROM users WHERE id = ?", user.id)!,
-      ),
+      user: publicUser(updated),
     };
   });
 

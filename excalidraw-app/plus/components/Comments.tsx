@@ -24,8 +24,9 @@ import {
 } from "../state";
 
 import {
+  AvatarContent,
   ErrorText,
-  initials,
+  PlusAvatar,
   SmallButton,
   timeAgo,
   useAsyncAction,
@@ -165,9 +166,11 @@ const Thread = ({
             key={comment.id}
             className={clsx("plus-comment", { reply: !!comment.parentId })}
           >
-            <span className="plus-avatar small" aria-hidden="true">
-              {initials(comment.author.name)}
-            </span>
+            <PlusAvatar
+              name={comment.author.name}
+              avatarUrl={comment.author.avatarUrl}
+              size="small"
+            />
             <div className="plus-comment__main">
               <div className="plus-comment__meta">
                 <strong className="plus-comment__author">
@@ -529,7 +532,9 @@ export const CommentPins = ({ api }: { api: ExcalidrawImperativeAPI }) => {
         return (
           <button
             key={thread.id}
-            className="plus-pin"
+            className={clsx("plus-pin", {
+              "has-avatar": !!thread.author.avatarUrl,
+            })}
             style={{ left: x, top: y }}
             title={`${thread.author.name}: ${thread.body}`}
             onClick={() => {
@@ -541,7 +546,11 @@ export const CommentPins = ({ api }: { api: ExcalidrawImperativeAPI }) => {
               });
             }}
           >
-            {initials(thread.author.name)}
+            <AvatarContent
+              name={thread.author.name}
+              avatarUrl={thread.author.avatarUrl}
+              imgClassName="plus-pin__avatar"
+            />
             {replies > 0 && (
               <span className="plus-pin__count">{replies + 1}</span>
             )}

@@ -77,6 +77,7 @@ type CommentRow = {
   parent_id: string | null;
   author_id: string;
   author_name: string;
+  author_avatar_url: string | null;
   element_id: string | null;
   x: number | null;
   y: number | null;
@@ -91,7 +92,11 @@ const commentJSON = (comment: CommentRow) => ({
   id: comment.id,
   sceneId: comment.scene_id,
   parentId: comment.parent_id,
-  author: { id: comment.author_id, name: comment.author_name },
+  author: {
+    id: comment.author_id,
+    name: comment.author_name,
+    avatarUrl: comment.author_avatar_url ?? null,
+  },
   elementId: comment.element_id,
   x: comment.x,
   y: comment.y,
@@ -108,7 +113,7 @@ const commentJSON = (comment: CommentRow) => ({
 const loadComment = (ctx: AppContext, commentId: string) => {
   const comment = get<CommentRow>(
     ctx.db,
-    `SELECT comments.*, users.name AS author_name FROM comments
+    `SELECT comments.*, users.name AS author_name, users.avatar_url AS author_avatar_url FROM comments
      JOIN users ON users.id = comments.author_id WHERE comments.id = ?`,
     commentId,
   );
@@ -330,17 +335,27 @@ export const registerSceneRoutes = (router: Router, ctx: AppContext) => {
       "SELECT * FROM scenes WHERE id = ?",
       sceneId,
     )!;
-    const owner = get<{ id: string; name: string; email: string }>(
+    const owner = get<{
+      id: string;
+      name: string;
+      email: string;
+      avatar_url: string | null;
+    }>(
       db,
-      "SELECT id, name, email FROM users WHERE id = ?",
+      "SELECT id, name, email, avatar_url FROM users WHERE id = ?",
       scene.owner_id,
     )!;
     return {
-      owner: { userId: owner.id, name: owner.name, email: owner.email },
+      owner: {
+        userId: owner.id,
+        name: owner.name,
+        email: owner.email,
+        avatarUrl: owner.avatar_url ?? null,
+      },
       teamId: scene.team_id,
       collaborators: all<any>(
         db,
-        `SELECT users.id, users.name, users.email, scene_access.role FROM scene_access
+        `SELECT users.id, users.name, users.email, users.avatar_url, scene_access.role FROM scene_access
          JOIN users ON users.id = scene_access.user_id WHERE scene_access.scene_id = ?
          ORDER BY users.name`,
         sceneId,
@@ -348,6 +363,7 @@ export const registerSceneRoutes = (router: Router, ctx: AppContext) => {
         userId: row.id,
         name: row.name,
         email: row.email,
+        avatarUrl: row.avatar_url ?? null,
         role: row.role,
       })),
       links: all<any>(
@@ -642,7 +658,7 @@ export const registerSceneRoutes = (router: Router, ctx: AppContext) => {
     const user = requireUser(db, req);
     const rows = all<CommentRow & { scene_name: string; seen_at: number }>(
       db,
-      `SELECT comments.*, users.name AS author_name, scenes.name AS scene_name
+      `SELECT comments.*, users.name AS author_name, users.avatar_url AS author_avatar_url, scenes.name AS scene_name
        FROM comments
        JOIN users ON users.id = comments.author_id
        JOIN scenes ON scenes.id = comments.scene_id
@@ -700,7 +716,7 @@ export const registerSceneRoutes = (router: Router, ctx: AppContext) => {
     return {
       comments: all<CommentRow>(
         db,
-        `SELECT comments.*, users.name AS author_name FROM comments
+        `SELECT comments.*, users.name AS author_name, users.avatar_url AS author_avatar_url FROM comments
          JOIN users ON users.id = comments.author_id
          WHERE comments.scene_id = ? ORDER BY comments.created_at`,
         scene.id,
@@ -844,6 +860,7 @@ export const registerSceneRoutes = (router: Router, ctx: AppContext) => {
     hub.connectSSE(sceneChannel(scene.id), res, {
       id: user?.id ?? null,
       name,
+      avatarUrl: user?.avatar_url ?? null,
     });
   });
 
@@ -1015,7 +1032,7 @@ export const handleSceneSocket = (
   const connection: Connection = hub.connectWebSocket(
     sceneChannel(sceneId),
     ws,
-    { id: user?.id ?? null, name },
+    { id: user?.id ?? null, name, avatarUrl: user?.avatar_url ?? null },
   );
 
   const reply = (event: string, data: unknown) =>

@@ -21,7 +21,7 @@ import {
 import { goToSignIn } from "../auth";
 
 import { HangoutButtons } from "./HangoutControls";
-import { initials } from "./ui";
+import { AvatarContent } from "./ui";
 
 const StatusPill = () => {
   const status = useAtomValue(cloudStatusAtom);
@@ -88,6 +88,7 @@ const Participants = () => {
           id: participant.userId ?? participant.connectionId,
           socketId,
           username: participant.name,
+          avatarUrl: participant.avatarUrl ?? undefined,
           isInCall: participant.inHangout,
         };
         const isBeingFollowed =
@@ -112,6 +113,7 @@ const Participants = () => {
               className={clsx("plus-avatar small plus-avatar-button", {
                 speaking: participant.inHangout,
                 "is-followed": isBeingFollowed,
+                "has-image": !!participant.avatarUrl,
               })}
               // the same colour the editor gives this person's cursor
               style={{
@@ -125,7 +127,10 @@ const Participants = () => {
               }${participant.sharingScreen ? " (sharing screen)" : ""}`}
               aria-label={`${participant.name} profile`}
             >
-              {initials(participant.name)}
+              <AvatarContent
+                name={participant.name}
+                avatarUrl={participant.avatarUrl}
+              />
               {isBeingFollowed && (
                 <span className="plus-avatar__follow-badge" aria-hidden="true">
                   {eyeIcon}
@@ -186,12 +191,14 @@ export const PlusTopRight = () => {
             )}
           </button>
           <button
-            className="plus-avatar plus-avatar-button"
+            className={clsx("plus-avatar plus-avatar-button", {
+              "has-image": !!user.avatarUrl,
+            })}
             onClick={() => setDialog({ name: "account" })}
             title={`${user.name} — account settings`}
             aria-label="Account settings"
           >
-            {initials(user.name)}
+            <AvatarContent name={user.name} avatarUrl={user.avatarUrl} />
           </button>
         </>
       ) : (

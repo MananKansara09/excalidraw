@@ -9,7 +9,7 @@ import { cloudSceneAtom, plusDialogAtom } from "../state";
 import {
   CopyField,
   ErrorText,
-  initials,
+  PlusAvatar,
   RoleSelect,
   SmallButton,
   useAsyncAction,
@@ -120,9 +120,10 @@ export const CloudShareDialog = () => {
               </form>
               <ul className="plus-list">
                 <li className="plus-list__row">
-                  <span className="plus-avatar" aria-hidden="true">
-                    {initials(access.owner.name)}
-                  </span>
+                  <PlusAvatar
+                    name={access.owner.name}
+                    avatarUrl={access.owner.avatarUrl}
+                  />
                   <span className="plus-list__main">
                     <span>{access.owner.name}</span>
                     <span className="plus-muted">{access.owner.email}</span>
@@ -131,9 +132,10 @@ export const CloudShareDialog = () => {
                 </li>
                 {access.collaborators.map((person) => (
                   <li key={person.userId} className="plus-list__row">
-                    <span className="plus-avatar" aria-hidden="true">
-                      {initials(person.name)}
-                    </span>
+                    <PlusAvatar
+                      name={person.name}
+                      avatarUrl={person.avatarUrl}
+                    />
                     <span className="plus-list__main">
                       <span>{person.name}</span>
                       <span className="plus-muted">{person.email}</span>

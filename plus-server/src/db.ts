@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   email TEXT NOT NULL UNIQUE COLLATE NOCASE,
   name TEXT NOT NULL,
+  avatar_url TEXT,
   password_hash TEXT NOT NULL,
   ai_key_enc TEXT,
   created_at INTEGER NOT NULL
@@ -148,6 +149,7 @@ export const openDatabase = (path: string): DB => {
   // migrations for databases created before these columns existed
   ensureColumn(db, "comments", "mentions", "TEXT NOT NULL DEFAULT '[]'");
   ensureColumn(db, "users", "mentions_seen_at", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(db, "users", "avatar_url", "TEXT");
   return db;
 };
 

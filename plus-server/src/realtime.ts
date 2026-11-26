@@ -24,6 +24,7 @@ export type Connection = {
   channel: string;
   userId: string | null;
   name: string;
+  avatarUrl: string | null;
   color: string;
   transport: Transport;
   inHangout: boolean;
@@ -37,6 +38,7 @@ export type Participant = {
   connectionId: string;
   userId: string | null;
   name: string;
+  avatarUrl: string | null;
   color: string;
   inHangout: boolean;
   sharingScreen: boolean;
@@ -94,7 +96,7 @@ export class RealtimeHub {
   connectSSE(
     channel: string,
     res: ServerResponse,
-    user: { id: string | null; name: string },
+    user: { id: string | null; name: string; avatarUrl?: string | null },
   ): Connection {
     res.writeHead(200, {
       "Content-Type": "text/event-stream",
@@ -121,7 +123,7 @@ export class RealtimeHub {
   connectWebSocket(
     channel: string,
     socket: WebSocketConnection,
-    user: { id: string | null; name: string },
+    user: { id: string | null; name: string; avatarUrl?: string | null },
   ): Connection {
     const connection = this.connect(
       channel,
@@ -147,7 +149,7 @@ export class RealtimeHub {
   private connect(
     channel: string,
     transport: Transport,
-    user: { id: string | null; name: string },
+    user: { id: string | null; name: string; avatarUrl?: string | null },
   ): Connection {
     let connections = this.channels.get(channel);
     if (!connections) {
@@ -159,6 +161,7 @@ export class RealtimeHub {
       channel,
       userId: user.id,
       name: user.name,
+      avatarUrl: user.avatarUrl ?? null,
       color: COLORS[connections.size % COLORS.length],
       transport,
       inHangout: false,
@@ -201,10 +204,40 @@ export class RealtimeHub {
       connectionId: c.id,
       userId: c.userId,
       name: c.name,
+      avatarUrl: c.avatarUrl,
       color: c.color,
       inHangout: c.inHangout,
       sharingScreen: c.sharingScreen,
     }));
+  }
+
+  /** Pushes updated profile fields (name / avatarUrl) to live rooms. */
+  updateUser(
+    userId: string,
+    patch: { name?: string; avatarUrl?: string | null },
+  ) {
+    for (const [channel, connections] of this.channels) {
+      let changed = false;
+      for (const connection of connections.values()) {
+        if (connection.userId !== userId) {
+          continue;
+        }
+        if (patch.name !== undefined && connection.name !== patch.name) {
+          connection.name = patch.name;
+          changed = true;
+        }
+        if (
+          patch.avatarUrl !== undefined &&
+          connection.avatarUrl !== patch.avatarUrl
+        ) {
+          connection.avatarUrl = patch.avatarUrl;
+          changed = true;
+        }
+      }
+      if (changed) {
+        this.broadcastPresence(channel);
+      }
+    }
   }
 
   send(connection: Connection, event: string, data: unknown) {

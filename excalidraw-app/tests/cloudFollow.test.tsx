@@ -136,4 +136,62 @@ describe("cloud participant profile & follow", () => {
 
     expect(signalSpy).toHaveBeenCalledWith("follow-stop", {}, "conn-bob");
   });
+
+  it("renders user and participant avatars across top bar and profile popover", async () => {
+    const adaAvatar =
+      "data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3C%2Fsvg%3E";
+    const bobAvatar =
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aF9cAAAAASUVORK5CYII=";
+
+    appJotaiStore.set(plusUserAtom, {
+      id: "user-1",
+      email: "ada@example.com",
+      name: "Ada",
+      avatarUrl: adaAvatar,
+      createdAt: 1,
+      hasAIKey: false,
+    });
+    appJotaiStore.set(participantsAtom, [
+      {
+        connectionId: "conn-bob",
+        userId: "user-2",
+        name: "Bob",
+        avatarUrl: bobAvatar,
+        color: "#ffd8a8",
+        inHangout: false,
+        sharingScreen: false,
+      },
+    ]);
+
+    const { container } = render(
+      <Provider store={appJotaiStore}>
+        <div className="excalidraw">
+          <PlusTopRight />
+        </div>
+      </Provider>,
+    );
+
+    const accountImg = container.querySelector<HTMLImageElement>(
+      'button[aria-label="Account settings"] img',
+    );
+    expect(accountImg?.getAttribute("src")).toBe(adaAvatar);
+
+    const bobTrigger = container.querySelector<HTMLElement>(
+      '[data-testid="collaborator-avatar-conn-bob"]',
+    );
+    expect(bobTrigger?.querySelector("img")?.getAttribute("src")).toBe(
+      bobAvatar,
+    );
+
+    fireEvent.click(bobTrigger!);
+
+    await waitFor(() => {
+      const profile = document.querySelector(
+        '[data-testid="collaborator-profile-conn-bob"]',
+      );
+      expect(profile?.querySelector("img")?.getAttribute("src")).toBe(
+        bobAvatar,
+      );
+    });
+  });
 });

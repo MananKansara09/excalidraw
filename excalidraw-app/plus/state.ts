@@ -47,6 +47,7 @@ export type Participant = {
   connectionId: string;
   userId: string | null;
   name: string;
+  avatarUrl?: string | null;
   color: string;
   inHangout: boolean;
   sharingScreen: boolean;

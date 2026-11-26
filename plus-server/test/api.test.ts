@@ -1087,3 +1087,174 @@ describe("rtc config", () => {
     });
   });
 });
+
+describe("user avatars", () => {
+  test("updates avatarUrl, rejects unsafe values, and propagates to comments, mentions, access, teams, and presence", async () => {
+    const { api: alice, user: aliceUser } = await signUp(server.base, "av1");
+    const { api: bob, user: bobUser } = await signUp(server.base, "av2");
+    assert.equal(aliceUser.avatarUrl, null);
+
+    const svgAvatar =
+      "data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3C%2Fsvg%3E";
+    const pngAvatar =
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aF9cAAAAASUVORK5CYII=";
+
+    // unsafe SVG or javascript URLs are rejected
+    assert.equal(
+      (
+        await alice.patch("/api/v1/me", {
+          // eslint-disable-next-line no-script-url
+          avatarUrl: "javascript:alert(1)",
+        })
+      ).status,
+      400,
+    );
+    assert.equal(
+      (
+        await alice.patch("/api/v1/me", {
+          avatarUrl:
+            "data:image/svg+xml;charset=utf-8,<svg><script>alert(1)</script></svg>",
+        })
+      ).status,
+      400,
+    );
+
+    const updated = await alice.patch("/api/v1/me", { avatarUrl: svgAvatar });
+    assert.equal(updated.status, 200);
+    assert.equal(updated.json.user.avatarUrl, svgAvatar);
+    assert.equal(
+      (await alice.get("/api/v1/me")).json.user.avatarUrl,
+      svgAvatar,
+    );
+
+    // team + scene + access + comments + mentions all expose avatarUrl
+    const team = (await alice.post("/api/v1/teams", { name: "AvTeam" })).json
+      .team;
+    assert.equal(team.members[0].avatarUrl, svgAvatar);
+
+    const scene = (await alice.post("/api/v1/scenes", { name: "AvScene" })).json
+      .scene;
+    const access = (
+      await alice.post(`/api/v1/scenes/${scene.id}/access`, {
+        email: "av2@example.com",
+        role: "editor",
+      })
+    ).json;
+    assert.equal(access.owner.avatarUrl, svgAvatar);
+    assert.equal(access.collaborators[0].avatarUrl, null);
+
+    const people = (await bob.get(`/api/v1/scenes/${scene.id}/people`)).json
+      .people;
+    assert.equal(
+      people.find((p: any) => p.userId === aliceUser.id).avatarUrl,
+      svgAvatar,
+    );
+
+    const comment = (
+      await alice.post(`/api/v1/scenes/${scene.id}/comments`, {
+        body: `@${bobUser.name} look at this`,
+        mentions: [{ userId: bobUser.id }],
+      })
+    ).json.comment;
+    assert.equal(comment.author.avatarUrl, svgAvatar);
+
+    const commentsList = (await bob.get(`/api/v1/scenes/${scene.id}/comments`))
+      .json.comments;
+    assert.equal(commentsList[0].author.avatarUrl, svgAvatar);
+
+    const inbox = (await bob.get("/api/v1/me/mentions")).json.mentions;
+    assert.equal(inbox[0].author.avatarUrl, svgAvatar);
+
+    // live presence receives initial avatarUrl and broadcasts updates
+    const aliceKey = (
+      await alice.post("/api/v1/me/api-keys", { name: "ws-alice" })
+    ).json.key;
+    const bobKey = (await bob.post("/api/v1/me/api-keys", { name: "sse-bob" }))
+      .json.key;
+
+    const openSSE = async (bearer: string) => {
+      const controller = new AbortController();
+      const response = await fetch(
+        `${server.base}/api/v1/scenes/${scene.id}/events`,
+        {
+          headers: { Authorization: `Bearer ${bearer}` },
+          signal: controller.signal,
+        },
+      );
+      const reader = response.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      const events: { event: string; data: any }[] = [];
+      const next = async (eventName: string) => {
+        for (;;) {
+          const idx = events.findIndex((e) => e.event === eventName);
+          if (idx >= 0) {
+            return events.splice(idx, 1)[0].data;
+          }
+          const { value, done } = await reader.read();
+          if (done) {
+            throw new Error(`stream ended waiting for ${eventName}`);
+          }
+          buffer += decoder.decode(value, { stream: true });
+          const frames = buffer.split("\n\n");
+          buffer = frames.pop()!;
+          for (const frame of frames) {
+            const eventMatch = /^event: (.+)$/m.exec(frame);
+            const dataMatch = /^data: (.+)$/m.exec(frame);
+            if (eventMatch && dataMatch) {
+              events.push({
+                event: eventMatch[1],
+                data: JSON.parse(dataMatch[1]),
+              });
+            }
+          }
+        }
+      };
+      await next("hello");
+      return {
+        next,
+        events,
+        close: () => controller.abort(),
+      };
+    };
+
+    const bobStream = await openSSE(bobKey);
+    const aliceStream = await openSSE(aliceKey);
+
+    const waitPresence = async (
+      predicate: (participants: any[]) => boolean,
+    ) => {
+      for (const item of bobStream.events) {
+        if (item.event === "presence" && predicate(item.data.participants)) {
+          return item.data.participants;
+        }
+      }
+      for (;;) {
+        const data = await bobStream.next("presence");
+        if (predicate(data.participants)) {
+          return data.participants;
+        }
+      }
+    };
+
+    const initialParticipants = await waitPresence((list) =>
+      list.some((p) => p.userId === aliceUser.id && p.avatarUrl === svgAvatar),
+    );
+    assert.ok(initialParticipants.length >= 2);
+
+    await alice.patch("/api/v1/me", { avatarUrl: pngAvatar });
+    await waitPresence((list) =>
+      list.some((p) => p.userId === aliceUser.id && p.avatarUrl === pngAvatar),
+    );
+
+    // clearing avatarUrl sets it back to null
+    const cleared = await alice.patch("/api/v1/me", { avatarUrl: null });
+    assert.equal(cleared.json.user.avatarUrl, null);
+    await waitPresence((list) =>
+      list.some((p) => p.userId === aliceUser.id && p.avatarUrl === null),
+    );
+
+    aliceStream.close();
+    bobStream.close();
+  });
+});

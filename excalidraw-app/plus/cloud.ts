@@ -1056,6 +1056,7 @@ class CloudSession {
       id: participant?.userId ?? from,
       socketId: id,
       username: participant?.name ?? "Guest",
+      avatarUrl: participant?.avatarUrl ?? undefined,
       pointer,
       button: data?.button === "down" ? "down" : "up",
       selectedElementIds: data?.selectedElementIds ?? {},
@@ -1111,9 +1112,11 @@ class CloudSession {
     this.cursorFrame = requestAnimationFrame(step);
   }
 
-  /** Drops the cursors of people who left, refreshes names and call state. */
+  /** Drops the cursors of people who left, refreshes names, avatars and call state. */
   private syncCollaboratorsWithPresence(participants: Participant[]) {
     const byId = new Map(participants.map((p) => [p.connectionId, p]));
+    const myConnectionId = appJotaiStore.get(connectionIdAtom);
+    const me = appJotaiStore.get(plusUserAtom);
     for (const followerId of [...this.followers]) {
       if (!byId.has(followerId)) {
         this.followers.delete(followerId);
@@ -1129,13 +1132,38 @@ class CloudSession {
         this.collaborators.delete(id);
         this.cursorTargets.delete(id);
         changed = true;
-      } else if (
-        collaborator.username !== participant.name ||
-        collaborator.isInCall !== participant.inHangout
+      } else {
+        const nextAvatarUrl = participant.avatarUrl ?? undefined;
+        if (
+          collaborator.username !== participant.name ||
+          collaborator.avatarUrl !== nextAvatarUrl ||
+          collaborator.isInCall !== participant.inHangout
+        ) {
+          this.collaborators.set(id, {
+            ...collaborator,
+            username: participant.name,
+            avatarUrl: nextAvatarUrl,
+            isInCall: participant.inHangout,
+          });
+          changed = true;
+        }
+      }
+    }
+    for (const participant of participants) {
+      if (
+        participant.connectionId === myConnectionId ||
+        (me && participant.userId === me.id)
       ) {
+        continue;
+      }
+      const id = participant.connectionId as SocketId;
+      if (!this.collaborators.has(id)) {
         this.collaborators.set(id, {
-          ...collaborator,
+          id: participant.userId ?? participant.connectionId,
+          socketId: id,
           username: participant.name,
+          avatarUrl: participant.avatarUrl ?? undefined,
+          selectedElementIds: {},
           isInCall: participant.inHangout,
         });
         changed = true;

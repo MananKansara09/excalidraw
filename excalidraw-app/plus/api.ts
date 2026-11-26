@@ -19,6 +19,7 @@ export type PlusUser = {
   id: string;
   email: string;
   name: string;
+  avatarUrl?: string | null;
   createdAt: number;
   hasAIKey: boolean;
 };
@@ -80,6 +81,7 @@ export type TeamDetail = {
     userId: string;
     name: string;
     email: string;
+    avatarUrl: string | null;
     role: TeamRole;
     joinedAt: number;
   }[];
@@ -87,12 +89,18 @@ export type TeamDetail = {
 };
 
 export type SceneAccess = {
-  owner: { userId: string; name: string; email: string };
+  owner: {
+    userId: string;
+    name: string;
+    email: string;
+    avatarUrl: string | null;
+  };
   teamId: string | null;
   collaborators: {
     userId: string;
     name: string;
     email: string;
+    avatarUrl: string | null;
     role: "editor" | "viewer";
   }[];
   links: {
@@ -107,7 +115,7 @@ export type PlusComment = {
   id: string;
   sceneId: string;
   parentId: string | null;
-  author: { id: string; name: string };
+  author: { id: string; name: string; avatarUrl: string | null };
   elementId: string | null;
   x: number | null;
   y: number | null;
@@ -120,7 +128,12 @@ export type PlusComment = {
 
 export type Mention = { userId: string; name: string };
 
-export type Person = { userId: string; name: string; email: string };
+export type Person = {
+  userId: string;
+  name: string;
+  email: string;
+  avatarUrl: string | null;
+};
 
 export type MentionInboxItem = PlusComment & {
   sceneName: string;
@@ -217,6 +230,7 @@ export const plusAPI = {
   logout: () => plusFetch("/auth/logout", { method: "POST", body: {} }),
   updateMe: (body: {
     name?: string;
+    avatarUrl?: string | null;
     aiKey?: string | null;
     password?: string;
     currentPassword?: string;
