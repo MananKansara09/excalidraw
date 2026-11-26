@@ -5,7 +5,9 @@ import { useEffect, useRef, useState } from "react";
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 
 import { useAtom, useAtomValue, useSetAtom } from "../../app-jotai";
+import { notificationEngine } from "../../notifications";
 import { plusAPI, PlusAPIError } from "../api";
+import { startPlusNotificationsSync } from "../notificationsSync";
 import {
   activeCommentIdAtom,
   cloudSceneAtom,
@@ -153,6 +155,41 @@ export const PlusRoot = ({ api }: { api: ExcalidrawImperativeAPI }) => {
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, [cloudStatus.state]);
+
+  // real-time server notifications + workspace user directory sync
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+    return startPlusNotificationsSync(user);
+  }, [user]);
+
+  // seed knownUsers from active cloud scene participants/members for canvas @mentions
+  useEffect(() => {
+    if (!scene?.id || !user) {
+      return;
+    }
+    let cancelled = false;
+    plusAPI
+      .listPeople(scene.id)
+      .then(({ people }) => {
+        if (!cancelled) {
+          notificationEngine.registerKnownUsers(
+            people.map((person) => ({
+              id: person.userId,
+              username: person.name,
+              email: person.email,
+              avatarUrl: person.avatarUrl,
+              source: "plus",
+            })),
+          );
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [scene?.id, user]);
 
   // unread @-mentions for the Workspace badge
   const setUnreadMentions = useSetAtom(mentionsUnreadAtom);

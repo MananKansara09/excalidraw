@@ -1,0 +1,77 @@
+.excalidraw {
+  .NotificationBell {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+
+    &__trigger {
+      position: relative;
+      width: var(--lg-button-size);
+      height: var(--lg-button-size);
+      padding: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: var(--border-radius-lg);
+      background-color: var(--island-bg-color);
+      color: var(--icon-fill-color);
+      border: 1px solid var(--default-border-color);
+      box-shadow: 0 0 0 1px var(--color-surface-lowest);
+      cursor: pointer;
+      transition: background-color 0.15s ease, border-color 0.15s ease;
+
+      svg {
+        width: 1.15rem;
+        height: 1.15rem;
+      }
+
+      &:hover,
+      &.is-open {
+        background-color: var(--button-hover-bg);
+        border-color: var(--color-primary-light-darker);
+      }
+
+      &.has-unread svg {
+        color: var(--color-primary);
+      }
+    }
+
+    &__badge {
+      position: absolute;
+      top: -5px;
+      right: -5px;
+      min-width: 1.05rem;
+      height: 1.05rem;
+      padding: 0 0.25rem;
+      border-radius: 999px;
+      background-color: #e03131;
+      color: #ffffff;
+      font-size: 0.625rem;
+      font-weight: 700;
+      line-height: 1.05rem;
+      text-align: center;
+      box-sizing: border-box;
+      box-shadow: 0 0 0 2px var(--island-bg-color);
+      pointer-events: none;
+    }
+
+    &__popover {
+      position: absolute;
+      top: calc(100% + 0.5rem);
+      right: 0;
+      z-index: 120;
+      width: min(24rem, calc(100vw - 2rem));
+      border-radius: var(--border-radius-lg);
+      background-color: var(--island-bg-color);
+      border: 1px solid var(--default-border-color);
+      box-shadow: var(--shadow-island);
+      overflow: hidden;
+
+      :root[dir="rtl"] & {
+        right: auto;
+        left: 0;
+      }
+    }
+  }
+}

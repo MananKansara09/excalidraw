@@ -172,3 +172,58 @@ export const initials = (name: string) =>
     .slice(0, 2)
     .map((part) => part[0]!.toUpperCase())
     .join("") || "?";
+
+export const AvatarContent = ({
+  name,
+  avatarUrl,
+  imgClassName = "plus-avatar__img",
+}: {
+  name: string;
+  avatarUrl?: string | null;
+  imgClassName?: string;
+}) => {
+  const [imgError, setImgError] = useState(false);
+
+  useEffect(() => {
+    setImgError(false);
+  }, [avatarUrl]);
+
+  if (avatarUrl && !imgError) {
+    return (
+      <img
+        className={imgClassName}
+        src={avatarUrl}
+        alt=""
+        referrerPolicy="no-referrer"
+        onError={() => setImgError(true)}
+      />
+    );
+  }
+
+  return <>{initials(name)}</>;
+};
+
+export const PlusAvatar = ({
+  name,
+  avatarUrl,
+  size = "medium",
+  className,
+}: {
+  name: string;
+  avatarUrl?: string | null;
+  size?: "small" | "medium" | "large";
+  className?: string;
+}) => (
+  <span
+    className={clsx(
+      "plus-avatar",
+      size === "small" && "small",
+      size === "large" && "large",
+      !!avatarUrl && "has-image",
+      className,
+    )}
+    aria-hidden="true"
+  >
+    <AvatarContent name={name} avatarUrl={avatarUrl} />
+  </span>
+);

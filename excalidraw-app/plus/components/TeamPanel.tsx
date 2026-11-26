@@ -5,7 +5,7 @@ import { plusAPI } from "../api";
 
 import {
   ErrorText,
-  initials,
+  PlusAvatar,
   RoleSelect,
   SmallButton,
   useAsyncAction,
@@ -160,9 +160,7 @@ export const TeamPanel = ({
               (team.role === "owner" || member.role !== "owner");
             return (
               <li key={member.userId} className="plus-list__row">
-                <span className="plus-avatar" aria-hidden="true">
-                  {initials(member.name)}
-                </span>
+                <PlusAvatar name={member.name} avatarUrl={member.avatarUrl} />
                 <span className="plus-list__main">
                   <span>
                     {member.name}

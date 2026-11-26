@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 
 import { useAtom, useAtomValue, useSetAtom } from "../../app-jotai";
+import { pendingTeamOpenAtom } from "../../notifications";
 import { plusAPI } from "../api";
 import { cloudSceneHash } from "../cloud";
 import {
@@ -76,12 +77,22 @@ export const WorkspaceDialog = ({
   const [user] = useAtom(plusUserAtom);
   const cloudScene = useAtomValue(cloudSceneAtom);
   const unreadMentions = useAtomValue(mentionsUnreadAtom);
+  const [pendingTeamId, setPendingTeamId] = useAtom(pendingTeamOpenAtom);
 
   const [view, setView] = useState<View>(
-    cloudScene?.teamId
+    pendingTeamId
+      ? { kind: "team", teamId: pendingTeamId, tab: "members" }
+      : cloudScene?.teamId
       ? { kind: "team", teamId: cloudScene.teamId, tab: "scenes" }
       : { kind: "personal" },
   );
+
+  useEffect(() => {
+    if (pendingTeamId) {
+      setView({ kind: "team", teamId: pendingTeamId, tab: "members" });
+      setPendingTeamId(null);
+    }
+  }, [pendingTeamId, setPendingTeamId]);
   const [folderId, setFolderId] = useState<string | null>(null);
   const [teams, setTeams] = useState<TeamSummary[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);

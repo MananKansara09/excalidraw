@@ -76,12 +76,20 @@ export type { App };
 
 export type SocketId = string & { _brand: "SocketId" };
 
+export type CollaboratorActivity = {
+  tool?: string;
+  isEditingText?: boolean;
+  isDrawing?: boolean;
+  isPanning?: boolean;
+};
+
 export type Collaborator = Readonly<{
   pointer?: CollaboratorPointer;
   button?: "up" | "down";
   selectedElementIds?: AppState["selectedElementIds"];
   username?: string | null;
   userState?: UserIdleState;
+  activity?: CollaboratorActivity;
   color?: {
     background: string;
     stroke: string;

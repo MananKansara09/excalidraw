@@ -18,6 +18,9 @@ export const WS_EVENTS = {
   SERVER: "server-broadcast",
   USER_FOLLOW_CHANGE: "user-follow",
   USER_FOLLOW_ROOM_CHANGE: "user-follow-room-change",
+  NOTIFICATION_REGISTER: "notification-register",
+  NOTIFICATION_DISPATCH: "notification-dispatch",
+  NOTIFICATION_RECEIVE: "notification-receive",
 } as const;
 
 export enum WS_SUBTYPES {
@@ -27,6 +30,7 @@ export enum WS_SUBTYPES {
   MOUSE_LOCATION = "MOUSE_LOCATION",
   IDLE_STATUS = "IDLE_STATUS",
   USER_VISIBLE_SCENE_BOUNDS = "USER_VISIBLE_SCENE_BOUNDS",
+  NOTIFICATION = "NOTIFICATION",
 }
 
 export const FIREBASE_STORAGE_PREFIXES = {
@@ -42,6 +46,8 @@ export const STORAGE_KEYS = {
   LOCAL_STORAGE_COLLAB: "excalidraw-collab",
   LOCAL_STORAGE_THEME: "excalidraw-theme",
   LOCAL_STORAGE_DEBUG: "excalidraw-debug",
+  LOCAL_STORAGE_KNOWN_USERS: "excalidraw-known-users",
+  LOCAL_STORAGE_SHARED_USERS: "excalidraw-shared-users",
   VERSION_DATA_STATE: "version-dataState",
   VERSION_FILES: "version-files",
 
