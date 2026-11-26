@@ -60,6 +60,19 @@ export const parseCloudHash = (
 
 export const cloudSceneHash = (sceneId: string) => `#cloud=${sceneId}`;
 
+/** `&comment=<id>` of a link to one comment thread. */
+export const parseCommentHash = (hash = window.location.hash) =>
+  new URLSearchParams(hash.replace(/^#/, "")).get("comment");
+
+/** A link that opens the current scene with one comment thread shown. */
+export const commentLinkURL = (commentId: string) => {
+  const scene = appJotaiStore.get(cloudSceneAtom);
+  const base = scene?.shareToken
+    ? `#share=${scene.shareToken}`
+    : `#cloud=${scene?.id ?? ""}`;
+  return `${window.location.origin}/${base}&comment=${commentId}`;
+};
+
 export const getShareURL = (token: string, embed = false) =>
   `${window.location.origin}/#share=${token}${embed ? "&embed=1" : ""}`;
 

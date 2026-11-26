@@ -10,6 +10,7 @@ import {
   activeCommentIdAtom,
   cloudSceneAtom,
   cloudStatusAtom,
+  commentsAtom,
   connectionIdAtom,
   participantsAtom,
   mentionsUnreadAtom,
@@ -17,6 +18,7 @@ import {
   plusDialogAtom,
   plusUserAtom,
 } from "../state";
+import { parseCommentHash } from "../cloud";
 import { hangout, hangoutAtom } from "../hangout";
 import { goToSignIn } from "../auth";
 
@@ -187,6 +189,19 @@ export const PlusRoot = ({ api }: { api: ExcalidrawImperativeAPI }) => {
       setPendingFocus(null);
     }
   }, [pendingFocus, scene?.id, api, setActiveComment, setPendingFocus]);
+
+  // a link to one comment (`&comment=<id>`): show its thread once loaded
+  const linkedComment = useRef<string | null>(parseCommentHash());
+  const comments = useAtomValue(commentsAtom);
+  useEffect(() => {
+    const id = linkedComment.current;
+    if (id && comments.some((c) => c.id === id)) {
+      linkedComment.current = null;
+      const thread = comments.find((c) => c.id === id)!;
+      const root = comments.find((c) => c.id === thread.parentId) ?? thread;
+      setActiveComment(root.id);
+    }
+  }, [comments, setActiveComment]);
 
   // tell people outside the call when someone starts sharing their screen
   const participants = useAtomValue(participantsAtom);

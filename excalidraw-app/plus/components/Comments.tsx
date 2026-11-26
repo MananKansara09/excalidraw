@@ -31,6 +31,7 @@ import {
   useAsyncAction,
 } from "./ui";
 
+import { CommentPopover } from "./CommentPopover";
 import { CommentBody, MentionInput, mentionsInText } from "./MentionInput";
 
 import type { Mention, Person, PlusComment } from "../api";
@@ -386,11 +387,21 @@ export const CommentsPanel = ({ api }: { api: ExcalidrawImperativeAPI }) => {
   );
 };
 
+const POPOVER_WIDTH = 320;
+const POPOVER_HEIGHT = 380;
+
 /** Pins for open threads, drawn over the canvas. */
 export const CommentPins = ({ api }: { api: ExcalidrawImperativeAPI }) => {
   const comments = useAtomValue(commentsAtom);
-  const setActive = useSetAtom(activeCommentIdAtom);
+  const scene = useAtomValue(cloudSceneAtom);
+  const user = useAtomValue(plusUserAtom);
+  const [activeId, setActive] = useAtom(activeCommentIdAtom);
   const [, setTick] = useState(0);
+  const [people, setPeople] = useState<Person[]>([]);
+  // `hoverId` follows the pointer; `stickyId` stays until closed (click)
+  const [hoverId, setHoverId] = useState<string | null>(null);
+  const [stickyId, setStickyId] = useState<string | null>(null);
+  const closeTimer = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     let frame = 0;
@@ -407,7 +418,50 @@ export const CommentPins = ({ api }: { api: ExcalidrawImperativeAPI }) => {
     };
   }, [api]);
 
-  const open = comments.filter((c) => !c.parentId && !c.resolved);
+  useEffect(() => () => window.clearTimeout(closeTimer.current), []);
+
+  const sceneId = scene?.id;
+  useEffect(() => {
+    if (!sceneId || !user) {
+      setPeople([]);
+      return;
+    }
+    let cancelled = false;
+    plusAPI
+      .listPeople(sceneId)
+      .then((result) => {
+        if (!cancelled) {
+          setPeople(result.people.filter((p) => p.userId !== user.id));
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [sceneId, user]);
+
+  // a comment link (or the inbox) asks for a thread to be shown
+  useEffect(() => {
+    if (activeId) {
+      setStickyId(activeId);
+    }
+  }, [activeId]);
+
+  const keepOpen = () => window.clearTimeout(closeTimer.current);
+  const leave = () => {
+    keepOpen();
+    closeTimer.current = window.setTimeout(() => setHoverId(null), 250);
+  };
+  const close = () => {
+    keepOpen();
+    setHoverId(null);
+    setStickyId(null);
+    setActive(null);
+  };
+
+  const open = comments
+    .filter((c) => !c.parentId && !c.resolved)
+    .sort((a, b) => a.createdAt - b.createdAt);
   if (!open.length) {
     return null;
   }
@@ -420,12 +474,69 @@ export const CommentPins = ({ api }: { api: ExcalidrawImperativeAPI }) => {
       .getSceneElements()
       .map((element) => [element.id, element as ExcalidrawElement]),
   );
-  const replyCounts = new Map<string, number>();
+  const repliesByThread = new Map<string, PlusComment[]>();
   for (const comment of comments) {
     if (comment.parentId) {
-      replyCounts.set(
-        comment.parentId,
-        (replyCounts.get(comment.parentId) ?? 0) + 1,
+      repliesByThread.set(comment.parentId, [
+        ...(repliesByThread.get(comment.parentId) ?? []),
+        comment,
+      ]);
+    }
+  }
+
+  const shownId = hoverId ?? stickyId;
+  const shownIndex = open.findIndex((thread) => thread.id === shownId);
+  const shown = shownIndex >= 0 ? open[shownIndex] : null;
+  const canModerate = scene?.role === "owner" || scene?.role === "editor";
+
+  const step = (delta: number) => {
+    const next = open[(shownIndex + delta + open.length) % open.length];
+    setHoverId(null);
+    setStickyId(next.id);
+    focusThread(api, next);
+  };
+
+  const toViewport = (comment: PlusComment) => {
+    const anchor = getAnchor(comment, elementsMap);
+    return anchor
+      ? sceneCoordsToViewportCoords(
+          { sceneX: anchor.x, sceneY: anchor.y },
+          appState,
+        )
+      : null;
+  };
+
+  let popover: React.ReactElement | null = null;
+  if (shown) {
+    const point = toViewport(shown);
+    if (point) {
+      const maxLeft = window.innerWidth - POPOVER_WIDTH - 8;
+      // open to the right of the pin, flipped when it would leave the screen
+      const left =
+        point.x + 14 + POPOVER_WIDTH > window.innerWidth
+          ? Math.max(8, point.x - 14 - POPOVER_WIDTH)
+          : Math.min(point.x + 14, maxLeft);
+      const top = Math.max(
+        8,
+        Math.min(point.y - 28, window.innerHeight - POPOVER_HEIGHT - 8),
+      );
+      popover = (
+        <CommentPopover
+          key={shown.id}
+          thread={shown}
+          replies={repliesByThread.get(shown.id) ?? []}
+          position={{ left, top }}
+          userId={user?.id ?? null}
+          canModerate={canModerate}
+          people={people}
+          index={shownIndex}
+          total={open.length}
+          onPrev={() => step(-1)}
+          onNext={() => step(1)}
+          onClose={close}
+          onPointerEnter={keepOpen}
+          onPointerLeave={leave}
+        />
       );
     }
   }
@@ -433,14 +544,11 @@ export const CommentPins = ({ api }: { api: ExcalidrawImperativeAPI }) => {
   return (
     <div className="plus-pins" aria-label="Comment pins">
       {open.map((thread) => {
-        const anchor = getAnchor(thread, elementsMap);
-        if (!anchor) {
+        const point = toViewport(thread);
+        if (!point) {
           return null;
         }
-        const { x, y } = sceneCoordsToViewportCoords(
-          { sceneX: anchor.x, sceneY: anchor.y },
-          appState,
-        );
+        const { x, y } = point;
         if (
           x < appState.offsetLeft ||
           y < appState.offsetTop ||
@@ -449,20 +557,23 @@ export const CommentPins = ({ api }: { api: ExcalidrawImperativeAPI }) => {
         ) {
           return null;
         }
-        const replies = replyCounts.get(thread.id) ?? 0;
+        const replies = repliesByThread.get(thread.id)?.length ?? 0;
         return (
           <button
             key={thread.id}
-            className="plus-pin"
+            className={clsx("plus-pin", { active: thread.id === shownId })}
             style={{ left: x, top: y }}
-            title={`${thread.author.name}: ${thread.body}`}
+            aria-label={`Comment by ${thread.author.name}`}
+            aria-expanded={thread.id === shownId}
+            onPointerEnter={() => {
+              keepOpen();
+              setHoverId(thread.id);
+            }}
+            onPointerLeave={leave}
+            onFocus={() => setHoverId(thread.id)}
             onClick={() => {
-              setActive(thread.id);
-              api.toggleSidebar({
-                name: "default",
-                tab: "comments",
-                force: true,
-              });
+              setStickyId((id) => (id === thread.id ? null : thread.id));
+              setHoverId(null);
             }}
           >
             {initials(thread.author.name)}
@@ -472,6 +583,7 @@ export const CommentPins = ({ api }: { api: ExcalidrawImperativeAPI }) => {
           </button>
         );
       })}
+      {popover}
     </div>
   );
 };
