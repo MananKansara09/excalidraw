@@ -592,6 +592,16 @@ class CloudSession {
 
   // comments -------------------------------------------------------------------
 
+  /** Removes a comment, and its replies if it is a thread. */
+  removeComment(commentId: string) {
+    appJotaiStore.set(
+      commentsAtom,
+      appJotaiStore
+        .get(commentsAtom)
+        .filter((c) => c.id !== commentId && c.parentId !== commentId),
+    );
+  }
+
   /** Adds or replaces a comment; tells the user when it mentions them. */
   upsertComment(comment: PlusComment) {
     const comments = appJotaiStore.get(commentsAtom);

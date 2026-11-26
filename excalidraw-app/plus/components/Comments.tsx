@@ -4,6 +4,7 @@ import {
 } from "@excalidraw/common";
 import { useUIAppState } from "@excalidraw/excalidraw/context/ui-appState";
 import { FilledButton } from "@excalidraw/excalidraw/components/FilledButton";
+import { TrashIcon } from "@excalidraw/excalidraw/components/icons";
 import { getCommonBounds } from "@excalidraw/element";
 import clsx from "clsx";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -76,6 +77,7 @@ const Thread = ({
   replies,
   api,
   canModerate,
+  isOwner,
   userId,
   active,
   people,
@@ -84,6 +86,7 @@ const Thread = ({
   replies: PlusComment[];
   api: ExcalidrawImperativeAPI;
   canModerate: boolean;
+  isOwner: boolean;
   userId: string | null;
   active: boolean;
   people: Person[];
@@ -131,20 +134,26 @@ const Thread = ({
             </span>
             <strong>{comment.author.name}</strong>
             <span className="plus-muted">{timeAgo(comment.createdAt)}</span>
-            {(comment.author.id === userId || canModerate) && (
+            {userId && (comment.author.id === userId || isOwner) && (
               <button
-                className="plus-icon-text danger"
+                className="plus-icon-text plus-delete-btn danger"
                 title="Delete comment"
-                onClick={() => {
+                aria-label="Delete comment"
+                disabled={pending}
+                onClick={async () => {
                   if (
                     comment.parentId ||
                     window.confirm("Delete this thread and its replies?")
                   ) {
-                    run(() => plusAPI.deleteComment(comment.id));
+                    await run(async () => {
+                      await plusAPI.deleteComment(comment.id);
+                      // remove right away; the live update is then a no-op
+                      cloudSession.removeComment(comment.id);
+                    });
                   }
                 }}
               >
-                Delete
+                {TrashIcon}
               </button>
             )}
           </div>
@@ -375,6 +384,7 @@ export const CommentsPanel = ({ api }: { api: ExcalidrawImperativeAPI }) => {
               replies={replies}
               api={api}
               canModerate={canModerate}
+              isOwner={scene.role === "owner"}
               userId={user?.id ?? null}
               active={thread.id === activeId}
               people={people}
