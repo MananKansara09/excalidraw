@@ -2,6 +2,7 @@ import { FilledButton } from "@excalidraw/excalidraw/components/FilledButton";
 import { useEffect, useState } from "react";
 
 import { plusAPI } from "../api";
+import { useModal } from "../dashboard/Modal";
 
 import {
   ErrorText,
@@ -35,6 +36,7 @@ export const TeamPanel = ({
   onTeamsChanged: () => void;
   onLeft: () => void;
 }) => {
+  const modal = useModal();
   const [team, setTeam] = useState<TeamDetail | null>(null);
   const [email, setEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<"member" | "admin">("member");
@@ -193,7 +195,14 @@ export const TeamPanel = ({
                     danger
                     onClick={async () => {
                       if (isMe) {
-                        if (!window.confirm(`Leave ${team.name}?`)) {
+                        if (
+                          !(await modal.confirm({
+                            title: "Leave team",
+                            message: `Leave ${team.name}?`,
+                            submitLabel: "Leave",
+                            danger: true,
+                          }))
+                        ) {
                           return;
                         }
                         const left = await run(() =>
@@ -253,9 +262,12 @@ export const TeamPanel = ({
             label="Delete team"
             onClick={async () => {
               if (
-                !window.confirm(
-                  `Delete ${team.name}? Its scenes and folders are deleted for everyone.`,
-                )
+                !(await modal.confirm({
+                  title: "Delete team",
+                  message: `Delete ${team.name}? Its scenes and folders are deleted for everyone.`,
+                  submitLabel: "Delete team",
+                  danger: true,
+                }))
               ) {
                 return;
               }

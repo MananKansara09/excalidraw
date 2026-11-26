@@ -18,7 +18,10 @@ import {
   plusUserAtom,
 } from "../state";
 import { hangout, hangoutAtom } from "../hangout";
+import { APP_ROUTES } from "../../app_routes";
 import { goToSignIn } from "../auth";
+
+import { openCloudScene, saveCanvasToCloud } from "../scenes";
 
 import { AccountDialog } from "./AccountDialog";
 import { CloudShareDialog } from "./CloudShareDialog";
@@ -27,11 +30,6 @@ import { ExportFramesDialog } from "./ExportFramesDialog";
 import { HangoutMedia } from "./HangoutControls";
 import { PresentationMode } from "./Presentation";
 import { ErrorText, Field, useAsyncAction } from "./ui";
-import {
-  openCloudScene,
-  saveCanvasToCloud,
-  WorkspaceDialog,
-} from "./WorkspaceDialog";
 
 import type { TeamSummary } from "../api";
 
@@ -259,12 +257,20 @@ export const PlusRoot = ({ api }: { api: ExcalidrawImperativeAPI }) => {
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [dialog, setDialog]);
 
+  // the workspace is its own page, which asks to sign in if need be
+  useEffect(() => {
+    if (dialog?.name === "workspace") {
+      setDialog(null);
+      window.location.assign(APP_ROUTES.dashboard);
+    }
+  }, [dialog, setDialog]);
+
   // dialogs that need an account ask to sign in first
   useEffect(() => {
     if (
       user === null &&
       dialog &&
-      ["workspace", "account", "save-to-cloud"].includes(dialog.name)
+      ["account", "save-to-cloud"].includes(dialog.name)
     ) {
       setDialog(null);
       goToSignIn("signin", "workspace");
@@ -273,9 +279,6 @@ export const PlusRoot = ({ api }: { api: ExcalidrawImperativeAPI }) => {
 
   return (
     <>
-      {dialog?.name === "workspace" && user && (
-        <WorkspaceDialog excalidrawAPI={api} />
-      )}
       {dialog?.name === "account" && user && <AccountDialog />}
       {dialog?.name === "share" && scene && <CloudShareDialog />}
       {dialog?.name === "export-frames" && <ExportFramesDialog api={api} />}

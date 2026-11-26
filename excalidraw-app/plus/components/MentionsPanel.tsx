@@ -8,9 +8,10 @@ import {
   plusDialogAtom,
 } from "../state";
 
+import { openCloudScene } from "../scenes";
+
 import { CommentBody } from "./MentionInput";
 import { ErrorText, initials, timeAgo, useAsyncAction } from "./ui";
-import { openCloudScene } from "./WorkspaceDialog";
 
 import type { MentionInboxItem, PlusUser } from "../api";
 

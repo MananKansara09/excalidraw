@@ -150,6 +150,7 @@ import "./index.scss";
 import { AppSidebar } from "./components/AppSidebar";
 import { goToSignIn } from "./plus/auth";
 import { cloudSession, parseCloudHash } from "./plus/cloud";
+import { DashboardPage } from "./plus/dashboard/DashboardPage";
 import { SignInPage } from "./plus/SignInPage";
 import { PlusRoot, usePlusSession } from "./plus/components/PlusRoot";
 import { PlusTopRight } from "./plus/components/PlusTopRight";
@@ -1433,6 +1434,9 @@ const ExcalidrawApp = () => {
   }
   if (window.location.pathname === APP_ROUTES.signIn) {
     return <SignInPage />;
+  }
+  if (window.location.pathname === APP_ROUTES.dashboard) {
+    return <DashboardPage />;
   }
 
   return (
