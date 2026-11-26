@@ -548,6 +548,57 @@ describe("realtime", () => {
         break;
       }
     }
+
+    // chat belongs to the talk: Alice hasn't joined, so she can't send
+    const post = (from: string, type: string, data?: unknown) =>
+      anon.post(`/api/v1/scenes/${scene.id}/signal?share=${token}`, {
+        from,
+        type,
+        data,
+      });
+    assert.equal((await post(alice.id, "chat", { text: "hi" })).status, 403);
+
+    await post(alice.id, "hangout-join");
+    assert.equal(
+      (await post(alice.id, "chat", { text: "  hello  " })).status,
+      200,
+    );
+    assert.equal((await post(alice.id, "chat", { text: "   " })).status, 400);
+    const chat = await bob.next("signal");
+    // skip over the join broadcast
+    const message = chat.type === "chat" ? chat : await bob.next("signal");
+    assert.equal(message.type, "chat");
+    assert.equal(message.data.name, "Alice");
+    assert.equal(message.data.text, "hello");
+
+    // someone who never joined doesn't see the chat
+    const carol = await open("Carol");
+    await post(alice.id, "chat", { text: "just us" });
+    await post(carol.id, "camera-start", { streamId: "cam-1" });
+    // the camera shows in presence, with its stream id; Carol isn't in the
+    // talk so it doesn't count
+    for (;;) {
+      const p = await alice.next("presence");
+      const entry = p.participants.find(
+        (x: any) => x.connectionId === carol.id,
+      );
+      if (entry) {
+        assert.equal(entry.cameraOn, false);
+        break;
+      }
+    }
+    await post(alice.id, "camera-start", { streamId: "cam-2" });
+    for (;;) {
+      const p = await bob.next("presence");
+      const entry = p.participants.find(
+        (x: any) => x.connectionId === alice.id,
+      );
+      if (entry?.cameraOn) {
+        assert.equal(entry.cameraStreamId, "cam-2");
+        break;
+      }
+    }
+    carol.close();
     alice.close();
     bob.close();
   });

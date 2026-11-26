@@ -893,14 +893,45 @@ export const registerSceneRoutes = (router: Router, ctx: AppContext) => {
       return { ok: true };
     }
 
+    // the id of the media stream a camera / screen track travels in, so
+    // receivers can tell the two video tracks apart
+    const streamId =
+      typeof body.data?.streamId === "string" &&
+      body.data.streamId.length <= 100
+        ? (body.data.streamId as string)
+        : null;
+
+    if (type === "chat") {
+      // chat belongs to the talk: only people who joined it can send or see it
+      if (!from.inHangout) {
+        throw forbidden("Join the talk to chat");
+      }
+      const text = requireString(body.data?.text, "text", { max: 1000 });
+      hub.broadcastToHangout(channel, "signal", {
+        type: "chat",
+        from: from.id,
+        // the server vouches for the name and the time
+        data: { id: newId(8), name: from.name, text, at: now() },
+      });
+      return { ok: true };
+    }
+
     if (type === "hangout-join" || type === "hangout-leave") {
       from.inHangout = type === "hangout-join";
       if (!from.inHangout) {
         from.sharingScreen = false;
+        from.cameraOn = false;
+        from.cameraStreamId = null;
+        from.screenStreamId = null;
       }
       hub.broadcastPresence(channel);
     } else if (type === "screen-share-start" || type === "screen-share-stop") {
       from.sharingScreen = type === "screen-share-start";
+      from.screenStreamId = from.sharingScreen ? streamId : null;
+      hub.broadcastPresence(channel);
+    } else if (type === "camera-start" || type === "camera-stop") {
+      from.cameraOn = type === "camera-start" && from.inHangout;
+      from.cameraStreamId = from.cameraOn ? streamId : null;
       hub.broadcastPresence(channel);
     }
     hub.broadcast(channel, "signal", message, from.id);

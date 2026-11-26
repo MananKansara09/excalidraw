@@ -16,6 +16,13 @@ export type Connection = {
   res: ServerResponse;
   inHangout: boolean;
   sharingScreen: boolean;
+  cameraOn: boolean;
+  /**
+   * Ids of the media streams carrying this peer's camera and screen, so
+   * receivers can tell the two video tracks apart (including late joiners).
+   */
+  cameraStreamId: string | null;
+  screenStreamId: string | null;
 };
 
 export type Participant = {
@@ -25,6 +32,9 @@ export type Participant = {
   color: string;
   inHangout: boolean;
   sharingScreen: boolean;
+  cameraOn: boolean;
+  cameraStreamId: string | null;
+  screenStreamId: string | null;
 };
 
 const COLORS = [
@@ -45,6 +55,9 @@ export const BROADCAST_SIGNALS = [
   "hangout-leave",
   "screen-share-start",
   "screen-share-stop",
+  "camera-start",
+  "camera-stop",
+  "chat",
   "pointer",
   "follow-slide",
 ] as const;
@@ -100,6 +113,9 @@ export class RealtimeHub {
       res,
       inHangout: false,
       sharingScreen: false,
+      cameraOn: false,
+      cameraStreamId: null,
+      screenStreamId: null,
     };
     connections.set(connection.id, connection);
     this.send(connection, "hello", {
@@ -138,6 +154,9 @@ export class RealtimeHub {
       color: c.color,
       inHangout: c.inHangout,
       sharingScreen: c.sharingScreen,
+      cameraOn: c.cameraOn,
+      cameraStreamId: c.cameraStreamId,
+      screenStreamId: c.screenStreamId,
     }));
   }
 
@@ -153,6 +172,18 @@ export class RealtimeHub {
   ) {
     for (const connection of this.channels.get(channel)?.values() ?? []) {
       if (connection.id !== exceptConnectionId) {
+        this.send(connection, event, data);
+      }
+    }
+  }
+
+  /**
+   * Sends to everyone who has joined the talk (the sender included). Chat uses
+   * this so only people in the call see it.
+   */
+  broadcastToHangout(channel: string, event: string, data: unknown) {
+    for (const connection of this.channels.get(channel)?.values() ?? []) {
+      if (connection.inHangout) {
         this.send(connection, event, data);
       }
     }

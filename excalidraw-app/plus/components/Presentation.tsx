@@ -23,6 +23,7 @@ import {
 } from "../state";
 import { getFrameName, getOrderedFrames } from "../export/frames";
 
+import { PresenterTalkControls } from "./HangoutControls";
 import { SmallButton } from "./ui";
 
 import type { Frame } from "../export/frames";
@@ -160,6 +161,8 @@ export const PresentationMode = ({ api }: { api: ExcalidrawImperativeAPI }) => {
   const [frames, setFrames] = useState<Frame[]>([]);
   const saved = useRef<SavedState | null>(null);
   const { active, index } = presentation;
+  // the talk (voice, cameras, chat) lives on cloud scenes
+  const scene = useAtomValue(cloudSceneAtom);
 
   const exit = useCallback(() => {
     setPresentation({ active: false, index: 0 });
@@ -260,6 +263,15 @@ export const PresentationMode = ({ api }: { api: ExcalidrawImperativeAPI }) => {
     }
     // capture phase, ahead of the editor's own shortcuts
     const onKeyDown = (event: KeyboardEvent) => {
+      // typing in the talk's chat isn't a slideshow command
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        (target.isContentEditable ||
+          ["INPUT", "TEXTAREA"].includes(target.tagName))
+      ) {
+        return;
+      }
       const forward = ["ArrowRight", "ArrowDown", "PageDown", " ", "Enter"];
       const back = ["ArrowLeft", "ArrowUp", "PageUp", "Backspace"];
       if (forward.includes(event.key)) {
@@ -325,6 +337,7 @@ export const PresentationMode = ({ api }: { api: ExcalidrawImperativeAPI }) => {
       >
         Laser
       </button>
+      {scene && <PresenterTalkControls />}
       <button onClick={exit} title="Exit (Esc)">
         Exit
       </button>

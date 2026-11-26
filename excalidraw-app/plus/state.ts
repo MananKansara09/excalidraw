@@ -44,6 +44,10 @@ export type Participant = {
   color: string;
   inHangout: boolean;
   sharingScreen: boolean;
+  cameraOn: boolean;
+  /** Which of their media streams is the camera / the screen. */
+  cameraStreamId: string | null;
+  screenStreamId: string | null;
 };
 
 export const participantsAtom = atom<Participant[]>([]);

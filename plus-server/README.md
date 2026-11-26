@@ -10,7 +10,7 @@ A self-hosted backend for the Plus features of the Excalidraw app in this reposi
 - **Live collaboration** on cloud scenes, with presence
 - **Comments**: threads pinned to elements or canvas spots, replies, resolve, `@`-mentions of anyone with access, with a toast and a mentions inbox
 - **Live pointers**: everyone's named cursor, laser and selection, viewers included
-- **Voice hangouts and screen sharing** (WebRTC, signaled by this server)
+- **The talk: voice, cameras, screen sharing and chat** (WebRTC, signaled by this server). Only people who join the talk hear, see and chat, including while presenting
 - **Presentations**: per-scene slide order (export to PDF/PPTX runs in the app)
 - **AI**: text-to-diagram and wireframe-to-code, 100 requests a day per user on the server's key, or unlimited with a user's own Anthropic API key
 - **REST API** and **MCP server** authenticated with per-user API keys
