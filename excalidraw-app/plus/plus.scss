@@ -1031,6 +1031,179 @@
   }
 }
 
+// phones and tablets -----------------------------------------------------------
+// Everything above is laid out for a desktop pointer; these rules make each
+// screen (workspace, account, comments, presentation, calls, sign in) usable
+// on touch devices and narrow viewports.
+
+// touch screens have no hover, so hover-revealed actions must always be there
+@media (hover: none) {
+  .excalidraw {
+    .plus-folder__actions {
+      display: flex;
+    }
+
+    .plus-scene__actions {
+      opacity: 1;
+    }
+
+    .plus-pill-button,
+    .plus-small-button,
+    .plus-tabs button,
+    .plus-workspace__nav button {
+      min-height: 2.5rem; // comfortable touch target
+    }
+  }
+}
+
+// tablets
+@media (max-width: 1024px) {
+  .excalidraw {
+    .plus-workspace__layout {
+      grid-template-columns: 10rem 1fr;
+    }
+
+    .plus-screens.expanded {
+      width: min(90vw, 1100px);
+    }
+  }
+}
+
+// phones
+@media (max-width: 720px) {
+  .excalidraw {
+    // inputs under 16px make iOS Safari zoom the page on focus
+    input,
+    textarea,
+    select {
+      font-size: 16px;
+    }
+
+    .plus-dialog .Modal__content {
+      max-height: 92vh;
+      max-height: 92dvh;
+    }
+
+    // top bar: keep it on one line and out of the editor's own controls
+    .plus-top-right {
+      max-width: calc(100vw - 1rem);
+      overflow-x: auto;
+      scrollbar-width: none;
+      gap: 0.3rem;
+
+      &::-webkit-scrollbar {
+        display: none;
+      }
+
+      > * {
+        flex: 0 0 auto;
+      }
+    }
+
+    .plus-pill-button {
+      padding: 0 0.6rem;
+    }
+
+    .plus-participants,
+    .plus-status span:not(.plus-status__dot) {
+      display: none;
+    }
+
+    // workspace: the folder nav becomes a swipeable strip above the list
+    .plus-workspace {
+      &__layout {
+        min-height: 0;
+      }
+
+      &__nav {
+        flex-direction: row;
+        align-items: center;
+        gap: 0.35rem;
+        border-right: none;
+        border-bottom: var(--plus-border);
+        padding: 0 0 0.5rem;
+        overflow-x: auto;
+        scrollbar-width: none;
+
+        &::-webkit-scrollbar {
+          display: none;
+        }
+
+        button {
+          flex: 0 0 auto;
+          max-width: 10rem;
+        }
+      }
+
+      &__nav-heading {
+        display: none;
+      }
+
+      &__header {
+        flex-wrap: wrap;
+      }
+    }
+
+    .plus-folders {
+      grid-template-columns: 1fr;
+    }
+
+    .plus-toolbar .plus-search {
+      flex-basis: 100%;
+    }
+
+    .plus-scene {
+      flex-wrap: wrap;
+      padding-bottom: 0.4rem;
+
+      &__open {
+        flex-basis: 100%;
+      }
+
+      &__actions {
+        padding-left: 0.75rem;
+        flex-wrap: wrap;
+      }
+    }
+
+    .plus-inline-form,
+    .plus-move,
+    .plus-presentation__actions {
+      flex-wrap: wrap;
+
+      > input,
+      > select {
+        flex: 1 1 100%;
+      }
+    }
+
+    .plus-copy-field {
+      flex-wrap: wrap;
+    }
+
+    // presentation controls: above the home-indicator, easy to tap
+    .plus-presenter {
+      bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
+      max-width: calc(100vw - 1rem);
+      opacity: 0.85;
+
+      button {
+        padding: 0.55rem 0.9rem;
+        min-height: 2.5rem;
+      }
+    }
+
+    // call screens: full width, above the mobile toolbar
+    .plus-screens,
+    .plus-screens.expanded {
+      left: 0.5rem;
+      right: 0.5rem;
+      width: auto;
+      bottom: calc(4rem + env(safe-area-inset-bottom, 0px));
+    }
+  }
+}
+
 // presenting: nothing but the slide and the controls
 body.plus-presenting .excalidraw {
   .layer-ui__wrapper__top-right,

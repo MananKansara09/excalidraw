@@ -151,6 +151,7 @@ import { AppSidebar } from "./components/AppSidebar";
 import { goToSignIn } from "./plus/auth";
 import { cloudSession, parseCloudHash } from "./plus/cloud";
 import { SignInPage } from "./plus/SignInPage";
+import { InstallPrompt } from "./components/InstallPrompt";
 import { PlusRoot, usePlusSession } from "./plus/components/PlusRoot";
 import { PlusTopRight } from "./plus/components/PlusTopRight";
 import { hangout } from "./plus/hangout";
@@ -1432,7 +1433,12 @@ const ExcalidrawApp = () => {
     return <ExcalidrawPlusIframeExport />;
   }
   if (window.location.pathname === APP_ROUTES.signIn) {
-    return <SignInPage />;
+    return (
+      <>
+        <SignInPage />
+        <InstallPrompt />
+      </>
+    );
   }
 
   return (
@@ -1440,6 +1446,7 @@ const ExcalidrawApp = () => {
       <Provider store={appJotaiStore}>
         <ExcalidrawAPIProvider>
           <ExcalidrawWrapper />
+          <InstallPrompt />
         </ExcalidrawAPIProvider>
       </Provider>
     </TopErrorBoundary>

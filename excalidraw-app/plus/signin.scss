@@ -182,3 +182,24 @@
     }
   }
 }
+
+// phones: a tighter card, and inputs at 16px so iOS doesn't zoom on focus
+@media (max-width: 480px) {
+  .plus-signin-page {
+    padding: 1rem 0.75rem;
+    align-items: flex-start;
+  }
+
+  .plus-signin {
+    gap: 1rem;
+
+    &__card {
+      padding: 1.25rem;
+    }
+
+    &__field input,
+    &__submit {
+      min-height: 2.75rem;
+    }
+  }
+}

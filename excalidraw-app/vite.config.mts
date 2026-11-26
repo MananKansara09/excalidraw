@@ -447,6 +447,8 @@ export default defineConfig(({ mode }) => {
           start_url: "/",
           id: "excalidraw",
           display: "standalone",
+          orientation: "any",
+          categories: ["productivity", "graphics"],
           theme_color: "#121212",
           background_color: "#ffffff",
           file_handlers: [

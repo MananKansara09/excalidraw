@@ -1,0 +1,128 @@
+.install-prompt {
+  --ip-bg: #ffffff;
+  --ip-text: #1e1e1e;
+  --ip-muted: #6b6b76;
+  --ip-border: #dedde8;
+  --ip-primary: #6965db;
+
+  position: fixed;
+  z-index: 1000;
+  left: 50%;
+  bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  width: min(32rem, calc(100vw - 1.5rem));
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  border-radius: 14px;
+  border: 1px solid var(--ip-border);
+  background: var(--ip-bg);
+  color: var(--ip-text);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.18);
+  font-family: "Assistant", system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 0.85rem;
+  line-height: 1.35;
+
+  :root.dark & {
+    --ip-bg: #232329;
+    --ip-text: #ececf1;
+    --ip-muted: #a0a0ab;
+    --ip-border: #3b3b43;
+    --ip-primary: #a8a5ff;
+  }
+
+  &__icon {
+    flex: 0 0 auto;
+    border-radius: 10px;
+  }
+
+  &__body {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+
+    strong {
+      font-size: 0.95rem;
+    }
+
+    span {
+      color: var(--ip-muted);
+    }
+  }
+
+  &__steps {
+    margin: 0;
+    padding-left: 1.1rem;
+    color: var(--ip-muted);
+
+    svg {
+      vertical-align: -2px;
+    }
+  }
+
+  &__actions {
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    align-items: stretch;
+  }
+
+  button {
+    font: inherit;
+    font-weight: 600;
+    min-height: 2.25rem; // comfortable touch target
+    padding: 0 0.9rem;
+    border-radius: 8px;
+    border: none;
+    cursor: pointer;
+  }
+
+  &__install {
+    background: var(--ip-primary);
+    color: #fff;
+
+    :root.dark & {
+      color: #121212;
+    }
+  }
+
+  &__dismiss {
+    background: transparent;
+    color: var(--ip-muted);
+    font-weight: 400 !important;
+  }
+
+  // phones: stack the buttons under the text so nothing gets squeezed
+  @media (max-width: 480px) {
+    flex-wrap: wrap;
+
+    &__body {
+      flex-basis: calc(100% - 44px - 0.75rem);
+    }
+
+    &__actions {
+      flex-direction: row-reverse;
+      flex-basis: 100%;
+
+      button {
+        flex: 1 1 0;
+      }
+    }
+  }
+}
+
+// keep it out of the way of a running presentation
+body.plus-presenting .install-prompt {
+  display: none;
+}
+
+@media print {
+  .install-prompt {
+    display: none;
+  }
+}
