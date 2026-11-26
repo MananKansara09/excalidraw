@@ -5,6 +5,7 @@ import {
   UserIdleState,
 } from "@excalidraw/common";
 
+import { t } from "./i18n";
 import { roundRect } from "./renderer/roundRect";
 
 import type { InteractiveCanvasRenderConfig } from "./scene/types";
@@ -51,6 +52,84 @@ export const getNameInitial = (name?: string | null) => {
   return (
     firstCodePoint ? String.fromCodePoint(firstCodePoint) : "?"
   ).toUpperCase();
+};
+
+const TOOL_ACTIVITY_LABELS: Record<string, string> = {
+  freedraw: "Drawing",
+  rectangle: "Drawing rectangle",
+  diamond: "Drawing diamond",
+  ellipse: "Drawing ellipse",
+  arrow: "Drawing arrow",
+  line: "Drawing line",
+  text: "Adding text",
+  frame: "Drawing frame",
+  magicframe: "Drawing wireframe",
+  embeddable: "Adding embed",
+  image: "Placing image",
+  lasso: "Lasso selecting",
+};
+
+export const getCollaboratorStatusInfo = (
+  collaborator: Pick<Collaborator, "userState">,
+): { state: "active" | "idle" | "away"; label: string } => {
+  if (collaborator.userState === UserIdleState.AWAY) {
+    return { state: "away", label: t("userList.profile.status.away") };
+  }
+  if (collaborator.userState === UserIdleState.IDLE) {
+    return { state: "idle", label: t("userList.profile.status.idle") };
+  }
+  return { state: "active", label: t("userList.profile.status.active") };
+};
+
+export const getCollaboratorActivityLabel = (
+  collaborator: Pick<
+    Collaborator,
+    "activity" | "button" | "pointer" | "selectedElementIds" | "userState"
+  >,
+): string => {
+  if (collaborator.userState === UserIdleState.AWAY) {
+    return t("userList.profile.status.away");
+  }
+  if (collaborator.userState === UserIdleState.IDLE) {
+    return t("userList.profile.status.idle");
+  }
+
+  const { activity, pointer, button, selectedElementIds } = collaborator;
+
+  if (activity?.isEditingText) {
+    return t("userList.profile.activity.editingText");
+  }
+  if (activity?.isPanning) {
+    return t("userList.profile.activity.panning");
+  }
+
+  const tool =
+    activity?.tool || (pointer?.tool === "laser" ? "laser" : undefined);
+
+  if (tool === "laser") {
+    return t("userList.profile.activity.laser");
+  }
+  if (tool === "eraser") {
+    return t("userList.profile.activity.eraser");
+  }
+  if (tool === "hand") {
+    return t("userList.profile.activity.hand");
+  }
+  if (tool && TOOL_ACTIVITY_LABELS[tool]) {
+    return TOOL_ACTIVITY_LABELS[tool];
+  }
+  if (activity?.isDrawing || (button === "down" && tool === "selection")) {
+    return t("userList.profile.activity.drawing");
+  }
+
+  const selectedCount = selectedElementIds
+    ? Object.keys(selectedElementIds).length
+    : 0;
+  if (selectedCount > 0 || tool === "selection") {
+    return t("userList.profile.activity.selecting");
+  }
+
+  return t("userList.profile.activity.viewing");
 };
 
 export const renderRemoteCursors = ({

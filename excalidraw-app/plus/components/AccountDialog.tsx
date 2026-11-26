@@ -5,8 +5,9 @@ import { useEffect, useState } from "react";
 import { useAtom, useSetAtom } from "../../app-jotai";
 import { plusAPI, PLUS_API_BASE } from "../api";
 import { cloudSession } from "../cloud";
-import { plusDialogAtom, plusUserAtom } from "../state";
+import { commentsAtom, plusDialogAtom, plusUserAtom } from "../state";
 
+import { AvatarPicker } from "./AvatarPicker";
 import {
   CopyField,
   ErrorText,
@@ -23,6 +24,7 @@ const apiOrigin = () =>
 
 export const AccountDialog = () => {
   const setDialog = useSetAtom(plusDialogAtom);
+  const setComments = useSetAtom(commentsAtom);
   const [user, setUser] = useAtom(plusUserAtom);
   const [name, setName] = useState(user?.name ?? "");
   const [aiKey, setAIKey] = useState("");
@@ -50,6 +52,27 @@ export const AccountDialog = () => {
   const refreshUsage = async () => setUsage(await plusAPI.aiUsage());
   const mcpURL = new URL("/mcp", window.location.origin).toString();
 
+  const syncUserState = (updated: typeof user) => {
+    if (!updated) {
+      return;
+    }
+    setUser(updated);
+    setComments((comments) =>
+      comments.map((comment) =>
+        comment.author.id === updated.id
+          ? {
+              ...comment,
+              author: {
+                ...comment.author,
+                name: updated.name,
+                avatarUrl: updated.avatarUrl ?? null,
+              },
+            }
+          : comment,
+      ),
+    );
+  };
+
   return (
     <Dialog
       size="regular"
@@ -61,13 +84,27 @@ export const AccountDialog = () => {
         <section className="plus-section">
           <h3>Profile</h3>
           <p className="plus-muted">{user.email}</p>
+          <AvatarPicker
+            name={user.name}
+            avatarUrl={user.avatarUrl ?? null}
+            disabled={pending}
+            onSave={async (nextAvatarUrl) => {
+              const result = await run(() =>
+                plusAPI.updateMe({ avatarUrl: nextAvatarUrl }),
+              );
+              if (result) {
+                syncUserState(result.user);
+                setNotice(nextAvatarUrl ? "Avatar updated" : "Avatar removed");
+              }
+            }}
+          />
           <form
             className="plus-inline-form"
             onSubmit={async (event) => {
               event.preventDefault();
               const result = await run(() => plusAPI.updateMe({ name }));
               if (result) {
-                setUser(result.user);
+                syncUserState(result.user);
                 setNotice("Name updated");
               }
             }}

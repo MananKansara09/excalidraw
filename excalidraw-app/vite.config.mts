@@ -159,6 +159,8 @@ export default defineConfig(({ mode }) => {
               target:
                 envVars.VITE_APP_PLUS_SERVER_URL || "http://localhost:3015",
               changeOrigin: true,
+              // the scene realtime channel is a WebSocket
+              ws: true,
             },
           ]),
         ),

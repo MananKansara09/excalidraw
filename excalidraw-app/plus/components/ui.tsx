@@ -1,3 +1,4 @@
+import { Select } from "@excalidraw/excalidraw/components/Select";
 import clsx from "clsx";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -67,19 +68,15 @@ export const RoleSelect = <T extends string>({
   disabled?: boolean;
   label: string;
 }) => (
-  <select
+  <Select
     className="plus-select"
-    aria-label={label}
+    label={label}
     value={value}
+    options={options}
     disabled={disabled}
-    onChange={(event) => onChange(event.target.value as T)}
-  >
-    {options.map((option) => (
-      <option key={option.value} value={option.value}>
-        {option.label}
-      </option>
-    ))}
-  </select>
+    onChange={onChange}
+    align="end"
+  />
 );
 
 /** Runs an async action, tracking pending state and the error message. */
@@ -172,3 +169,58 @@ export const initials = (name: string) =>
     .slice(0, 2)
     .map((part) => part[0]!.toUpperCase())
     .join("") || "?";
+
+export const AvatarContent = ({
+  name,
+  avatarUrl,
+  imgClassName = "plus-avatar__img",
+}: {
+  name: string;
+  avatarUrl?: string | null;
+  imgClassName?: string;
+}) => {
+  const [imgError, setImgError] = useState(false);
+
+  useEffect(() => {
+    setImgError(false);
+  }, [avatarUrl]);
+
+  if (avatarUrl && !imgError) {
+    return (
+      <img
+        className={imgClassName}
+        src={avatarUrl}
+        alt=""
+        referrerPolicy="no-referrer"
+        onError={() => setImgError(true)}
+      />
+    );
+  }
+
+  return <>{initials(name)}</>;
+};
+
+export const PlusAvatar = ({
+  name,
+  avatarUrl,
+  size = "medium",
+  className,
+}: {
+  name: string;
+  avatarUrl?: string | null;
+  size?: "small" | "medium" | "large";
+  className?: string;
+}) => (
+  <span
+    className={clsx(
+      "plus-avatar",
+      size === "small" && "small",
+      size === "large" && "large",
+      !!avatarUrl && "has-image",
+      className,
+    )}
+    aria-hidden="true"
+  >
+    <AvatarContent name={name} avatarUrl={avatarUrl} />
+  </span>
+);
