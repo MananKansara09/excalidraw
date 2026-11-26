@@ -1,4 +1,4 @@
-// Claude chat: a right-side panel plus a one-line bar on the canvas, styled
+// Claude chat: a one-line bar on the canvas OR a right-side panel (one at a time), styled
 // after the Claude Code interface (warm neutrals, coral accent, light + dark).
 
 .claude-root {
@@ -117,6 +117,15 @@
       transform: rotate(45deg);
     }
   }
+  &.busy svg {
+    animation: claude-spin 2.4s linear infinite;
+  }
+}
+
+@keyframes claude-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @keyframes claude-pop {
@@ -138,16 +147,10 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  transition: left 0.25s ease, width 0.25s ease;
-
-  // keep clear of the docked panel
-  &.panel-open {
-    left: calc((100% - 408px) / 2);
-    width: min(560px, calc(100% - 408px - 220px));
-    &.wide {
-      left: calc((100% - min(600px, 50vw) - 8px) / 2);
-      width: min(560px, calc(100% - min(600px, 50vw) - 220px));
-    }
+  &.dragging {
+    outline: 2px dashed var(--cl-accent);
+    outline-offset: 6px;
+    border-radius: 16px;
   }
 }
 
@@ -160,10 +163,18 @@
   border-radius: 12px;
   background: var(--cl-bg);
   box-shadow: var(--cl-shadow);
-  cursor: pointer;
   animation: claude-rise 0.2s ease;
+}
+
+.claude-bar-setup {
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  color: var(--cl-muted);
+  cursor: pointer;
   &:hover {
     border-color: var(--cl-accent);
+    color: var(--cl-text);
   }
 }
 
@@ -587,16 +598,13 @@
   .claude-panel.wide {
     width: 100%;
   }
-  .claude-bar,
-  .claude-bar.panel-open,
-  .claude-bar.panel-open.wide {
+  .claude-bar {
     left: 12px;
-    width: calc(100% - 24px - 58px);
+    width: calc(100% - 24px);
     transform: none;
     bottom: 72px;
   }
-  // the panel covers the canvas on phones
-  .claude-bar.panel-open {
+  .claude-stack {
     display: none;
   }
 }
@@ -664,4 +672,379 @@
   font-size: 12.5px;
   color: var(--cl-error);
   background: var(--cl-error-bg);
+}
+
+// bar extras: checkpoint stack, small icon buttons ------------------------------
+
+.claude-icon-btn {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 8px;
+  color: var(--cl-muted);
+  background: transparent;
+  cursor: pointer;
+  &:hover {
+    color: var(--cl-text);
+    background: var(--cl-surface);
+  }
+}
+
+// earlier prompts pile up to the left of the bar, blurred until hovered; each
+// one is a checkpoint the canvas can be rewound to
+.claude-stack {
+  position: absolute;
+  right: calc(100% + 14px);
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  width: max-content;
+  max-width: min(240px, 18vw);
+  pointer-events: none;
+}
+
+.claude-cp {
+  --depth: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  max-width: 100%;
+  padding: 5px 10px;
+  border: 1px solid var(--cl-border);
+  border-radius: 10px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--cl-text);
+  background: var(--cl-bg);
+  box-shadow: var(--cl-shadow);
+  cursor: pointer;
+  pointer-events: auto;
+  opacity: calc(0.9 - var(--depth) * 0.14);
+  filter: blur(calc(1.2px + var(--depth) * 0.5px));
+  transform: scale(calc(1 - var(--depth) * 0.04));
+  transform-origin: right bottom;
+  transition: filter 0.15s, opacity 0.15s, transform 0.15s, border-color 0.15s;
+  &:hover:not(:disabled) {
+    opacity: 1;
+    filter: none;
+    transform: scale(1);
+    border-color: var(--cl-accent);
+  }
+  &:disabled {
+    cursor: default;
+  }
+}
+.claude-cp-icon {
+  flex: none;
+  color: var(--cl-accent);
+}
+.claude-cp-text {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+// attachments -----------------------------------------------------------------
+
+.claude-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 0 12px 6px;
+}
+.claude-bar .claude-files {
+  padding: 0;
+}
+
+.claude-file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 4px 4px 0 0;
+  padding: 1px 8px;
+  border: 1px solid var(--cl-border);
+  border-radius: 999px;
+  font-size: 11.5px;
+  color: var(--cl-muted);
+  background: var(--cl-surface);
+  button {
+    padding: 0 2px;
+    border: 0;
+    color: inherit;
+    background: none;
+    cursor: pointer;
+  }
+}
+
+.claude-file-error {
+  align-self: center;
+  font-size: 12px;
+  color: var(--cl-error);
+}
+
+.claude-panel.dragging {
+  outline: 2px dashed var(--cl-accent);
+  outline-offset: -6px;
+}
+
+.claude-composer .claude-icon-btn {
+  align-self: flex-end;
+  margin-bottom: 2px;
+}
+
+.claude-restore {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  font: inherit;
+  font-size: 12px;
+  color: var(--cl-muted);
+  background: none;
+  cursor: pointer;
+  &:hover:not(:disabled) {
+    color: var(--cl-accent);
+  }
+  &:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+}
+
+// tabs: Chat / Logs / History, like Claude Code's ------------------------------
+
+.claude-tabs {
+  display: flex;
+  gap: 18px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--cl-border);
+  button {
+    position: relative;
+    padding: 8px 0;
+    border: 0;
+    font: inherit;
+    font-size: 13px;
+    color: var(--cl-muted);
+    background: none;
+    cursor: pointer;
+    &:hover {
+      color: var(--cl-text);
+    }
+    &.active {
+      color: var(--cl-text);
+      font-weight: 600;
+      &::after {
+        content: "";
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: -1px;
+        height: 2px;
+        background: var(--cl-accent);
+      }
+    }
+  }
+}
+.claude-tab-count {
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 400;
+  color: var(--cl-muted);
+  background: var(--cl-surface);
+}
+
+// logs: a terminal-style transcript ------------------------------------------
+
+.claude-logs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.claude-log-empty {
+  margin: auto;
+  max-width: 300px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--cl-muted);
+}
+.claude-log {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  summary {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    cursor: pointer;
+    list-style: none;
+    &::-webkit-details-marker {
+      display: none;
+    }
+  }
+  time {
+    flex: none;
+    color: var(--cl-muted);
+    opacity: 0.7;
+  }
+  .claude-log-mark {
+    flex: none;
+    width: 1em;
+    text-align: center;
+    color: var(--cl-muted);
+  }
+  .claude-log-body {
+    flex: 1;
+    min-width: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  &.user .claude-log-mark {
+    color: var(--cl-accent);
+  }
+  &.user .claude-log-body {
+    color: var(--cl-muted);
+  }
+  &.meta {
+    color: var(--cl-muted);
+  }
+  &.error {
+    color: var(--cl-error);
+    .claude-log-mark {
+      color: var(--cl-error);
+    }
+  }
+  &.thinking {
+    display: block;
+    color: var(--cl-muted);
+    font-style: italic;
+  }
+  &.tool {
+    display: block;
+    .claude-log-mark {
+      color: #3fa66b;
+    }
+    &.error .claude-log-mark {
+      color: var(--cl-error);
+    }
+    &.running .claude-log-mark {
+      color: var(--cl-accent);
+      animation: claude-blink 1s ease-in-out infinite;
+    }
+    .claude-log-body b {
+      font-weight: 600;
+    }
+  }
+  .claude-log-result {
+    display: block;
+    color: var(--cl-muted);
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .claude-log-elbow {
+    color: var(--cl-muted);
+  }
+  pre {
+    margin: 4px 0 4px 5.4em;
+    padding: 8px 10px;
+    max-height: 240px;
+    overflow: auto;
+    border: 1px solid var(--cl-border);
+    border-radius: 8px;
+    font: inherit;
+    font-size: 11.5px;
+    white-space: pre-wrap;
+    word-break: break-all;
+    background: var(--cl-raised);
+  }
+}
+
+@keyframes claude-blink {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+// history ---------------------------------------------------------------------
+
+.claude-history {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.claude-history-new,
+.claude-history-clear {
+  padding: 7px 10px;
+  border: 1px solid var(--cl-border);
+  border-radius: 10px;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  color: var(--cl-text);
+  background: var(--cl-surface);
+  cursor: pointer;
+  &:hover {
+    border-color: var(--cl-accent);
+  }
+}
+.claude-history-clear {
+  margin-top: 6px;
+  text-align: center;
+  color: var(--cl-error);
+}
+.claude-history-item {
+  display: flex;
+  align-items: center;
+  border-radius: 10px;
+  &:hover,
+  &.active {
+    background: var(--cl-surface);
+  }
+  > button:first-child {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    padding: 8px 10px;
+    border: 0;
+    font: inherit;
+    text-align: left;
+    color: var(--cl-text);
+    background: none;
+    cursor: pointer;
+  }
+}
+.claude-history-title {
+  overflow: hidden;
+  font-size: 13.5px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.claude-history-meta {
+  font-size: 11.5px;
+  color: var(--cl-muted);
+}
+.claude-history-delete {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 8px;
+  font-size: 16px;
+  color: var(--cl-muted);
+  background: none;
+  cursor: pointer;
+  &:hover {
+    color: var(--cl-error);
+  }
 }

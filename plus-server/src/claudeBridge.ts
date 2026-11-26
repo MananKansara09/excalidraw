@@ -8,7 +8,8 @@ import type { AppContext } from "./context.ts";
 import type { Request } from "./http.ts";
 
 export const CLAUDE_BRIDGE_PREFIX = "/claude-bridge";
-const MAX_BODY = 2 * 1024 * 1024;
+// room for five 5 MB attachments sent as base64, plus the prompt
+const MAX_BODY = 36 * 1024 * 1024;
 
 const readBody = (req: IncomingMessage) =>
   new Promise<Buffer>((resolve, reject) => {

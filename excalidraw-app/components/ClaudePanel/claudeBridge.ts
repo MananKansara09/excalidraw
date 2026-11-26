@@ -9,14 +9,33 @@ export type SceneSummary = {
   selectedIds: string[];
 };
 
+export type AttachmentPayload = {
+  name: string;
+  mediaType: string;
+  /** base64, without the data-URL prefix */
+  data: string;
+};
+
+export type DoneStats = {
+  durationMs?: number;
+  turns?: number;
+  costUsd?: number;
+};
+
 type Handlers = {
-  onSession: (sessionId: string) => void;
+  onSession: (sessionId: string, model?: string) => void;
   onText: (delta: string) => void;
   onThinking?: (delta: string) => void;
   onTool: (name: string) => void;
+  onToolUse?: (call: { id: string; name: string; input: unknown }) => void;
+  onToolResult?: (result: {
+    id: string;
+    output: string;
+    isError: boolean;
+  }) => void;
   onOps: (op: BridgeOp) => void;
   onError: (message: string, code?: string) => void;
-  onDone: () => void;
+  onDone: (stats?: DoneStats) => void;
 };
 
 const BASE = "/claude-bridge";
@@ -85,7 +104,12 @@ export const disconnect = async () => {
 
 /** POSTs a chat turn and dispatches the server-sent events as they arrive */
 export const streamChat = async (
-  body: { message: string; sessionId?: string; scene: SceneSummary },
+  body: {
+    message: string;
+    sessionId?: string;
+    scene: SceneSummary;
+    attachments?: AttachmentPayload[];
+  },
   handlers: Handlers,
   signal: AbortSignal,
 ) => {
@@ -134,19 +158,23 @@ export const streamChat = async (
     }
     switch (event) {
       case "session":
-        return handlers.onSession(data.sessionId);
+        return handlers.onSession(data.sessionId, data.model);
       case "text":
         return handlers.onText(data.delta);
       case "thinking":
         return handlers.onThinking?.(data.delta);
       case "tool":
         return handlers.onTool(data.name);
+      case "tool_use":
+        return handlers.onToolUse?.(data);
+      case "tool_result":
+        return handlers.onToolResult?.(data);
       case "ops":
         return handlers.onOps(data);
       case "error":
         return handlers.onError(data.message, data.code);
       case "done":
-        return handlers.onDone();
+        return handlers.onDone(data);
     }
   };
 

@@ -72,6 +72,20 @@ describe("claude bridge proxy", () => {
     assert.equal(JSON.parse(seen.at(-1)!.body).message, "draw");
   });
 
+  test("passes chats carrying 5 MB attachments through", async () => {
+    const { api } = await signUp(server.base, "claude4");
+    const data = Buffer.alloc(5 * 1024 * 1024, 1).toString("base64");
+    const res = await api.post("/claude-bridge/chat", {
+      message: "use this",
+      attachments: [{ name: "a.pdf", mediaType: "application/pdf", data }],
+    });
+    assert.equal(res.status, 200);
+    assert.equal(
+      JSON.parse(seen.at(-1)!.body).attachments[0].data.length,
+      data.length,
+    );
+  });
+
   test("rejects non-JSON posts and other methods", async () => {
     const { api } = await signUp(server.base, "claude3");
     const put = await api.put("/claude-bridge/chat", {});

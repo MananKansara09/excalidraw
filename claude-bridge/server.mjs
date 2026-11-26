@@ -30,6 +30,12 @@ import {
   tool,
 } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
+import {
+  buildUserContent,
+  MAX_CHAT_BODY,
+  translateMessage,
+  validateAttachments,
+} from "./chat.mjs";
 
 const MULTIUSER = process.env.CLAUDE_BRIDGE_MODE === "multiuser";
 const PORT = Number(process.env.CLAUDE_BRIDGE_PORT || 3016);
@@ -68,20 +74,21 @@ Element rules (Excalidraw "skeleton" format):
 - Use a consistent, tasteful palette (e.g. fills #a5d8ff, #b2f2bb, #ffec99, #ffc9c9, #d0bfff with stroke #1e1e1e).
 - Add a title text above bigger diagrams. Draw in as few tool calls as possible (batch all elements in one add_elements call; create referenced shapes in the same batch).
 - To change existing elements use update_elements with their ids from the scene summary; to remove use delete_elements.
-You cannot read files or run commands. If asked for something unrelated to drawing, answer briefly.`;
+When the user attaches files (PDFs, images, text), read them and apply them to the canvas as asked: turn a document into a diagram or slides, redraw a screenshot, follow instructions written in it. Summarize rather than copy long passages.
+You cannot read files from disk or run commands. If asked for something unrelated to drawing, answer briefly.`;
 
 const sendJson = (res, status, body) => {
   res.writeHead(status, { "content-type": "application/json" });
   res.end(JSON.stringify(body));
 };
 
-const readBody = (req) =>
+const readBody = (req, limit = MAX_BODY) =>
   new Promise((resolve, reject) => {
     let size = 0;
     const chunks = [];
     req.on("data", (c) => {
       size += c.length;
-      if (size > MAX_BODY) {
+      if (size > limit) {
         reject(new Error("Request too large"));
         req.destroy();
         return;
@@ -366,8 +373,10 @@ const activeUsers = new Set();
 
 const handleChat = async (req, res, user) => {
   let payload;
+  let attachments;
   try {
-    payload = JSON.parse(await readBody(req));
+    payload = JSON.parse(await readBody(req, MAX_CHAT_BODY));
+    attachments = validateAttachments(payload.attachments);
   } catch (e) {
     return sendJson(res, 400, { error: String(e.message || e) });
   }
@@ -409,9 +418,32 @@ const handleChat = async (req, res, user) => {
     "delete_elements",
     "clear_canvas",
   ];
+  const promptText = `${summarizeScene(
+    scene,
+  )}\n\n---\nUser request:\n${message}`;
+
+  // Files need content blocks, which the SDK takes as a stream of user turns.
+  // The stream stays open until the answer is complete so canvas tools work.
+  let finish = () => {};
+  const finished = new Promise((resolve) => (finish = resolve));
+  const prompt = attachments.length
+    ? (async function* () {
+        yield {
+          type: "user",
+          message: {
+            role: "user",
+            content: buildUserContent(promptText, attachments),
+          },
+          parent_tool_use_id: null,
+          session_id: sessionId || "",
+        };
+        await finished;
+      })()
+    : promptText;
+
   try {
     const stream = query({
-      prompt: `${summarizeScene(scene)}\n\n---\nUser request:\n${message}`,
+      prompt,
       options: {
         abortController: abort,
         cwd: user.workDir,
@@ -431,40 +463,9 @@ const handleChat = async (req, res, user) => {
     });
 
     for await (const msg of stream) {
-      if (msg.type === "system" && msg.subtype === "init") {
-        emit("session", { sessionId: msg.session_id });
-      } else if (msg.type === "stream_event") {
-        const ev = msg.event;
-        if (
-          ev.type === "content_block_delta" &&
-          ev.delta.type === "text_delta" &&
-          !msg.parent_tool_use_id
-        ) {
-          emit("text", { delta: ev.delta.text });
-        } else if (
-          ev.type === "content_block_delta" &&
-          ev.delta.type === "thinking_delta" &&
-          !msg.parent_tool_use_id
-        ) {
-          emit("thinking", { delta: ev.delta.thinking });
-        } else if (
-          ev.type === "content_block_start" &&
-          ev.content_block.type === "tool_use"
-        ) {
-          emit("tool", {
-            name: ev.content_block.name.replace(/^mcp__excalidraw__/, ""),
-          });
-        }
-      } else if (msg.type === "assistant" && msg.error) {
-        emit("error", { code: msg.error, message: friendlyError(msg.error) });
-      } else if (msg.type === "result") {
-        if (msg.is_error) {
-          emit("error", {
-            code: msg.subtype,
-            message: friendlyError(msg.subtype, msg.result),
-          });
-        }
-        emit("done", { sessionId: msg.session_id });
+      translateMessage(msg, emit, friendlyError);
+      if (msg.type === "result") {
+        finish();
       }
     }
   } catch (e) {
@@ -475,6 +476,7 @@ const handleChat = async (req, res, user) => {
       });
     }
   } finally {
+    finish();
     activeUsers.delete(user.id);
     activeChats--;
     res.end();
