@@ -1178,7 +1178,6 @@ const ExcalidrawWrapper = () => {
       joinSharedRoomLink,
       setActiveCommentId,
       setPendingCommentFocus,
-      setPlusDialog,
     ],
   );
 
