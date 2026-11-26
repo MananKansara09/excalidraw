@@ -812,9 +812,27 @@
       opacity: 0.65;
     }
 
+    cursor: pointer;
+
+    &.flash {
+      animation: plus-thread-flash 1.6s ease-out;
+    }
+
     &__actions {
       display: flex;
       gap: 0.35rem;
+    }
+  }
+
+  @keyframes plus-thread-flash {
+    0%,
+    40% {
+      background: var(--color-primary-light);
+      box-shadow: 0 0 0 3px var(--color-primary);
+      opacity: 1;
+    }
+    100% {
+      background: transparent;
     }
   }
 

@@ -92,12 +92,39 @@ const Thread = ({
   const [replyMentions, setReplyMentions] = useState<Mention[]>([]);
   const { pending, error, run } = useAsyncAction();
   const ref = useRef<HTMLLIElement>(null);
+  const setActive = useSetAtom(activeCommentIdAtom);
+  const [flash, setFlash] = useState(false);
+
+  const highlight = () => {
+    ref.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+    // restart the animation even when the same thread is clicked again
+    setFlash(false);
+    requestAnimationFrame(() => setFlash(true));
+  };
 
   useEffect(() => {
     if (active) {
-      ref.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      highlight();
     }
   }, [active]);
+
+  useEffect(() => {
+    if (!flash) {
+      return;
+    }
+    const timeout = setTimeout(() => setFlash(false), 1600);
+    return () => clearTimeout(timeout);
+  }, [flash]);
+
+  // clicking a thread (resolved ones have no pin) jumps to it on the canvas
+  const onThreadClick = (event: React.MouseEvent) => {
+    if ((event.target as HTMLElement).closest("button, input, textarea, a")) {
+      return;
+    }
+    setActive(thread.id);
+    highlight();
+    focusThread(api, thread);
+  };
 
   const sendReply = async () => {
     const text = reply.trim();
@@ -121,7 +148,12 @@ const Thread = ({
   return (
     <li
       ref={ref}
-      className={clsx("plus-thread", { resolved: thread.resolved, active })}
+      className={clsx("plus-thread", {
+        resolved: thread.resolved,
+        active,
+        flash,
+      })}
+      onClick={onThreadClick}
     >
       {[thread, ...replies].map((comment) => (
         <div key={comment.id} className="plus-comment">
@@ -159,7 +191,13 @@ const Thread = ({
       ))}
       <div className="plus-thread__actions">
         {(thread.elementId || thread.x !== null) && (
-          <SmallButton onClick={() => focusThread(api, thread)}>
+          <SmallButton
+            onClick={() => {
+              setActive(thread.id);
+              highlight();
+              focusThread(api, thread);
+            }}
+          >
             Show
           </SmallButton>
         )}
