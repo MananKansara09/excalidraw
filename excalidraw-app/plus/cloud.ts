@@ -3,7 +3,11 @@ import {
   reconcileElements,
   restoreAppState,
   restoreElements,
+  zoomToFitBounds,
 } from "@excalidraw/excalidraw";
+import { getCollaboratorActivityLabel } from "@excalidraw/excalidraw/clients";
+import { throttleRAF } from "@excalidraw/common";
+import { getVisibleSceneBounds } from "@excalidraw/element";
 import throttle from "lodash.throttle";
 
 import type {
@@ -16,9 +20,11 @@ import type {
   BinaryFileData,
   BinaryFiles,
   Collaborator,
+  CollaboratorActivity,
   CollaboratorPointer,
   ExcalidrawImperativeAPI,
   SocketId,
+  UserToFollow,
 } from "@excalidraw/excalidraw/types";
 
 import { appJotaiStore } from "../app-jotai";
@@ -26,8 +32,11 @@ import { LocalData } from "../data/LocalData";
 
 import { plusAPI, PlusAPIError, setActiveShareToken } from "./api";
 import {
+  cloudCollaboratorsAtom,
+  cloudFollowedActivityAtom,
   cloudSceneAtom,
   cloudStatusAtom,
+  cloudUserToFollowAtom,
   commentsAtom,
   connectionIdAtom,
   mentionsUnreadAtom,
@@ -64,11 +73,12 @@ export const getShareURL = (token: string, embed = false) =>
 
 export type SignalMessage = { type: string; from: string; data: any };
 
-/** What each client broadcasts about its pointer and selection. */
+/** What each client broadcasts about its pointer, selection and activity. */
 type PointerPayload = {
   pointer: { x: number; y: number; tool: "pointer" | "laser" } | null;
   button: "up" | "down";
   selectedElementIds: AppState["selectedElementIds"];
+  activity?: CollaboratorActivity;
 };
 
 /** Interval between pointer broadcasts. */
@@ -155,6 +165,12 @@ class CloudSession {
   private cursorFrame = 0;
   private pointerInFlight = false;
   private pointerQueued = false;
+  /** Connection ids currently following this user's screen navigation. */
+  private followers = new Set<string>();
+  private followTarget: UserToFollow | null = null;
+  private unsubScroll: (() => void) | null = null;
+  private prevViewportSize: { width: number; height: number } | null = null;
+  private lastActivityKey = "";
 
   get sceneId() {
     return this.scene?.id ?? null;
@@ -210,6 +226,12 @@ class CloudSession {
     this.syncedName = scene.name;
     appJotaiStore.set(cloudSceneAtom, this.scene);
     appJotaiStore.set(cloudStatusAtom, { state: "saved", at: Date.now() });
+    const appState = api.getAppState();
+    this.prevViewportSize = {
+      width: appState.width,
+      height: appState.height,
+    };
+    this.unsubScroll = api.onScrollChange(() => this.relayViewport());
     this.openEvents();
     this.loadComments();
   }
@@ -245,6 +267,16 @@ class CloudSession {
     appJotaiStore.set(participantsAtom, []);
     appJotaiStore.set(connectionIdAtom, null);
     this.sendPointer.cancel();
+    this.relayViewport.cancel();
+    this.unsubScroll?.();
+    this.unsubScroll = null;
+    this.followers.clear();
+    this.followTarget = null;
+    this.prevViewportSize = null;
+    this.lastActivityKey = "";
+    appJotaiStore.set(cloudUserToFollowAtom, null);
+    appJotaiStore.set(cloudFollowedActivityAtom, null);
+    appJotaiStore.set(cloudCollaboratorsAtom, new Map());
     cancelAnimationFrame(this.remoteFrame);
     cancelAnimationFrame(this.cursorFrame);
     this.remoteFrame = this.cursorFrame = 0;
@@ -269,18 +301,38 @@ class CloudSession {
     if (!this.scene) {
       return;
     }
-    // everyone, viewers included, shares what they have selected
+    // everyone, viewers included, shares what they have selected & what they are doing
     const selectionKey = Object.keys(appState.selectedElementIds)
       .filter((id) => appState.selectedElementIds[id])
       .sort()
       .join(",");
-    if (selectionKey !== this.lastSelectionKey) {
+    const activity = this.getActivityFromAppState(appState);
+    const activityKey = `${
+      activity.tool ?? ""
+    }|${!!activity.isEditingText}|${!!activity.isDrawing}|${!!activity.isPanning}`;
+    if (
+      selectionKey !== this.lastSelectionKey ||
+      activityKey !== this.lastActivityKey
+    ) {
       this.lastSelectionKey = selectionKey;
+      this.lastActivityKey = activityKey;
       this.lastPointer = {
         ...this.lastPointer,
         selectedElementIds: appState.selectedElementIds,
+        activity,
       };
       this.sendPointer();
+    }
+    if (
+      this.prevViewportSize &&
+      (appState.width !== this.prevViewportSize.width ||
+        appState.height !== this.prevViewportSize.height)
+    ) {
+      this.prevViewportSize = {
+        width: appState.width,
+        height: appState.height,
+      };
+      this.relayViewport();
     }
     if (!this.canEdit()) {
       return;
@@ -565,6 +617,19 @@ class CloudSession {
           this.onRemotePointer(message.from, message.data);
           return;
         }
+        if (message.type === "follow-start") {
+          this.followers.add(message.from);
+          this.sendViewportTo(message.from);
+          return;
+        }
+        if (message.type === "follow-stop") {
+          this.followers.delete(message.from);
+          return;
+        }
+        if (message.type === "viewport") {
+          this.onRemoteViewport(message.from, message.data);
+          return;
+        }
         this.signalListeners.forEach((listener) => listener(message));
         break;
       }
@@ -813,9 +878,108 @@ class CloudSession {
       ...this.lastPointer,
       pointer: payload.pointer,
       button: payload.button,
+      activity: this.api
+        ? this.getActivityFromAppState(this.api.getAppState())
+        : undefined,
     };
     this.sendPointer();
   };
+
+  setUserToFollow = (userToFollow: UserToFollow | null) => {
+    const prev = this.followTarget;
+    if (prev?.socketId === userToFollow?.socketId) {
+      return;
+    }
+    if (prev) {
+      this.signal("follow-stop", {}, prev.socketId).catch(() => {});
+    }
+    this.followTarget = userToFollow;
+    appJotaiStore.set(cloudUserToFollowAtom, userToFollow);
+    this.syncFollowedActivity();
+    if (userToFollow && this.scene && appJotaiStore.get(connectionIdAtom)) {
+      this.signal("follow-start", {}, userToFollow.socketId).catch(() => {});
+    }
+  };
+
+  private getActivityFromAppState(
+    appState: Pick<
+      AppState,
+      | "activeTool"
+      | "editingTextElement"
+      | "newElement"
+      | "selectedLinearElement"
+      | "selectedElementsAreBeingDragged"
+    >,
+  ): CollaboratorActivity {
+    return {
+      tool: appState.activeTool.type,
+      isEditingText: !!appState.editingTextElement,
+      isDrawing:
+        !!appState.newElement ||
+        !!appState.selectedLinearElement?.isEditing ||
+        appState.selectedElementsAreBeingDragged,
+      isPanning: appState.activeTool.type === "hand",
+    };
+  }
+
+  private relayViewport = throttleRAF(() => {
+    if (!this.api || !this.scene || this.followers.size === 0) {
+      return;
+    }
+    const sceneBounds = getVisibleSceneBounds(this.api.getAppState());
+    for (const followerId of this.followers) {
+      this.signal("viewport", { sceneBounds }, followerId).catch(() => {});
+    }
+  });
+
+  private sendViewportTo(followerId: string) {
+    if (!this.api || !this.scene) {
+      return;
+    }
+    const sceneBounds = getVisibleSceneBounds(this.api.getAppState());
+    this.signal("viewport", { sceneBounds }, followerId).catch(() => {});
+  }
+
+  private onRemoteViewport(
+    from: string,
+    data: { sceneBounds?: ReturnType<typeof getVisibleSceneBounds> },
+  ) {
+    if (
+      !this.api ||
+      !data?.sceneBounds ||
+      this.followTarget?.socketId !== from ||
+      this.followers.has(from)
+    ) {
+      return;
+    }
+    const fitted = zoomToFitBounds({
+      appState: this.api.getAppState(),
+      bounds: data.sceneBounds,
+      fit: "contain",
+    });
+    this.api.updateScene({
+      appState: {
+        scrollX: fitted.appState.scrollX,
+        scrollY: fitted.appState.scrollY,
+        zoom: fitted.appState.zoom,
+      },
+      captureUpdate: CaptureUpdateAction.NEVER,
+    });
+  }
+
+  private syncFollowedActivity() {
+    if (!this.followTarget) {
+      appJotaiStore.set(cloudFollowedActivityAtom, null);
+      return;
+    }
+    const collaborator = this.collaborators.get(this.followTarget.socketId);
+    appJotaiStore.set(
+      cloudFollowedActivityAtom,
+      collaborator
+        ? getCollaboratorActivityLabel(collaborator)
+        : "Viewing canvas",
+    );
+  }
 
   private sendPointer = throttle(
     () => {
@@ -852,7 +1016,10 @@ class CloudSession {
   );
 
   private renderCollaborators() {
-    this.api?.updateScene({ collaborators: new Map(this.collaborators) });
+    const next = new Map(this.collaborators);
+    appJotaiStore.set(cloudCollaboratorsAtom, next);
+    this.syncFollowedActivity();
+    this.api?.updateScene({ collaborators: next });
   }
 
   private onRemotePointer(from: string, data: PointerPayload) {
@@ -860,7 +1027,8 @@ class CloudSession {
       .get(participantsAtom)
       .find((p) => p.connectionId === from);
     const id = from as SocketId;
-    const previous = this.collaborators.get(id)?.pointer;
+    const existing = this.collaborators.get(id);
+    const previous = existing?.pointer;
     // glide from where the cursor is drawn now, instead of jumping
     const pointer: CollaboratorPointer | undefined = data?.pointer
       ? {
@@ -868,20 +1036,30 @@ class CloudSession {
           y: previous?.y ?? data.pointer.y,
           tool: data.pointer.tool === "laser" ? "laser" : "pointer",
         }
-      : undefined;
+      : existing?.pointer;
     if (data?.pointer) {
       this.cursorTargets.set(id, { x: data.pointer.x, y: data.pointer.y });
-    } else {
-      this.cursorTargets.delete(id);
     }
+    const incomingActivity = data?.activity;
+    const prevActivity = existing?.activity;
+    const activity =
+      incomingActivity &&
+      prevActivity &&
+      prevActivity.tool === incomingActivity.tool &&
+      prevActivity.isEditingText === incomingActivity.isEditingText &&
+      prevActivity.isDrawing === incomingActivity.isDrawing &&
+      prevActivity.isPanning === incomingActivity.isPanning
+        ? prevActivity
+        : incomingActivity ?? prevActivity;
     this.collaborators.set(id, {
-      ...this.collaborators.get(id),
+      ...existing,
       id: participant?.userId ?? from,
       socketId: id,
       username: participant?.name ?? "Guest",
       pointer,
       button: data?.button === "down" ? "down" : "up",
       selectedElementIds: data?.selectedElementIds ?? {},
+      activity,
       isInCall: participant?.inHangout,
     });
     this.renderCollaborators();
@@ -936,6 +1114,14 @@ class CloudSession {
   /** Drops the cursors of people who left, refreshes names and call state. */
   private syncCollaboratorsWithPresence(participants: Participant[]) {
     const byId = new Map(participants.map((p) => [p.connectionId, p]));
+    for (const followerId of [...this.followers]) {
+      if (!byId.has(followerId)) {
+        this.followers.delete(followerId);
+      }
+    }
+    if (this.followTarget && !byId.has(this.followTarget.socketId)) {
+      this.setUserToFollow(null);
+    }
     let changed = false;
     for (const [id, collaborator] of this.collaborators) {
       const participant = byId.get(id);

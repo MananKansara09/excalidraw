@@ -261,7 +261,9 @@ class Collab extends PureComponent<CollabProps, CollabState> {
 
       if (this.portal.isOpen()) {
         const nextActivity = this.getActivityFromAppState(appState);
-        const nextKey = `${nextActivity.tool ?? ""}|${!!nextActivity.isEditingText}|${!!nextActivity.isDrawing}|${!!nextActivity.isPanning}`;
+        const nextKey = `${
+          nextActivity.tool ?? ""
+        }|${!!nextActivity.isEditingText}|${!!nextActivity.isDrawing}|${!!nextActivity.isPanning}`;
         if (nextKey !== prevActivityKey) {
           prevActivityKey = nextKey;
           this.broadcastActivityChange(nextActivity);

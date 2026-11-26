@@ -157,7 +157,9 @@ import { PlusRoot, usePlusSession } from "./plus/components/PlusRoot";
 import { PlusTopRight } from "./plus/components/PlusTopRight";
 import { hangout } from "./plus/hangout";
 import {
+  cloudFollowedActivityAtom,
   cloudSceneAtom,
+  cloudUserToFollowAtom,
   plusDialogAtom,
   plusUserAtom,
   presentationAtom,
@@ -487,10 +489,16 @@ const ExcalidrawWrapper = () => {
   const collabError = useAtomValue(collabErrorIndicatorAtom);
   const userToFollow = useAtomValue(userToFollowAtom);
   const followedUserActivity = useAtomValue(followedUserActivityAtom);
+  const cloudUserToFollow = useAtomValue(cloudUserToFollowAtom);
+  const cloudFollowedActivity = useAtomValue(cloudFollowedActivityAtom);
+  const activeUserToFollow = cloudScene ? cloudUserToFollow : userToFollow;
+  const activeFollowedActivity = cloudScene
+    ? cloudFollowedActivity
+    : followedUserActivity;
 
   const viewportStatusFrame = useMemo(
     () =>
-      userToFollow
+      activeUserToFollow
         ? {
             border: "var(--color-primary-hover)",
             label: {
@@ -506,11 +514,11 @@ const ExcalidrawWrapper = () => {
                       textOverflow: "ellipsis",
                       maxWidth: 100,
                     }}
-                    title={userToFollow.username}
+                    title={activeUserToFollow.username}
                   >
-                    {userToFollow.username}
+                    {activeUserToFollow.username}
                   </span>
-                  {followedUserActivity && (
+                  {activeFollowedActivity && (
                     <span
                       style={{
                         opacity: 0.85,
@@ -518,16 +526,19 @@ const ExcalidrawWrapper = () => {
                         whiteSpace: "nowrap",
                       }}
                     >
-                      • {followedUserActivity}
+                      • {activeFollowedActivity}
                     </span>
                   )}
                 </>
               ),
-              onClose: () => collabAPI?.setUserToFollow(null),
+              onClose: () =>
+                cloudScene
+                  ? cloudSession.setUserToFollow(null)
+                  : collabAPI?.setUserToFollow(null),
             },
           }
         : null,
-    [userToFollow, followedUserActivity, collabAPI],
+    [activeUserToFollow, activeFollowedActivity, cloudScene, collabAPI],
   );
 
   useHandleLibrary({
@@ -1240,7 +1251,15 @@ const ExcalidrawWrapper = () => {
         viewModeEnabled={cloudScene?.role === "viewer" ? true : undefined}
         zenModeEnabled={cloudScene?.embed ? true : undefined}
         viewportStatusFrame={viewportStatusFrame}
-        userToFollow={userToFollow}
+        userToFollow={activeUserToFollow}
+        onUserFollow={
+          cloudScene
+            ? (payload) =>
+                cloudSession.setUserToFollow(
+                  payload.action === "FOLLOW" ? payload.userToFollow : null,
+                )
+            : undefined
+        }
         onChange={onChange}
         onExport={onExport}
         initialData={initialStatePromiseRef.current.promise}
