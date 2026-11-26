@@ -58,7 +58,8 @@ export class RealtimeHub {
     this.heartbeat = setInterval(() => {
       for (const channel of this.channels.values()) {
         for (const connection of channel.values()) {
-          connection.res.write(": ping\n\n");
+          // a real event (not a comment) so clients can tell the stream lives
+          connection.res.write("event: ping\ndata: {}\n\n");
         }
       }
     }, 25_000);

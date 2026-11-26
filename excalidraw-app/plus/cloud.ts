@@ -74,6 +74,10 @@ type PointerPayload = {
 
 /** Interval between pointer broadcasts. */
 const POINTER_INTERVAL_MS = 60;
+/** The server pings every 25s; this long without any event means a dead stream. */
+const STREAM_STALE_MS = 70_000;
+const STREAM_WATCHDOG_MS = 15_000;
+const MAX_RECONNECT_DELAY_MS = 30_000;
 type SignalListener = (message: SignalMessage) => void;
 
 const toBinaryFiles = (files: Record<string, PlusFile> | undefined) =>
@@ -104,6 +108,12 @@ class CloudSession {
   private needsAnotherFlush = false;
   private signalListeners = new Set<SignalListener>();
   private connectedOnce = false;
+  /** The event stream dropped; edits still save, but nothing arrives. */
+  private streamDown = false;
+  private lastEventAt = 0;
+  private reconnectAttempts = 0;
+  private reconnectTimer: number | null = null;
+  private watchdogTimer: number | null = null;
   /** Other people's cursors and selections, by connection id. */
   private collaborators = new Map<SocketId, Collaborator>();
   private lastPointer: PointerPayload = {
@@ -193,11 +203,12 @@ class CloudSession {
     if (this.scene && this.canEdit()) {
       this.flush.flush();
     }
-    this.events?.close();
-    this.events = null;
+    this.closeEvents();
     this.scene = null;
     this.api = null;
     this.connectedOnce = false;
+    this.streamDown = false;
+    this.reconnectAttempts = 0;
     setActiveShareToken(null);
     appJotaiStore.set(cloudSceneAtom, null);
     appJotaiStore.set(participantsAtom, []);
@@ -322,7 +333,14 @@ class CloudSession {
         this.syncedName = name;
       }
       if (this.scene === scene) {
-        appJotaiStore.set(cloudStatusAtom, { state: "saved", at: Date.now() });
+        // edits reach the server even when the event stream is down, but
+        // "Saved" would hide that nobody's changes are arriving
+        appJotaiStore.set(
+          cloudStatusAtom,
+          this.streamDown
+            ? { state: "offline" }
+            : { state: "saved", at: Date.now() },
+        );
       }
     } catch (error: any) {
       appJotaiStore.set(
@@ -402,19 +420,75 @@ class CloudSession {
     }
   }
 
+  private closeEvents() {
+    this.events?.close();
+    this.events = null;
+    if (this.reconnectTimer !== null) {
+      window.clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    if (this.watchdogTimer !== null) {
+      window.clearInterval(this.watchdogTimer);
+      this.watchdogTimer = null;
+    }
+  }
+
+  /**
+   * A browser retries a dropped stream by itself, but gives up for good when
+   * the reconnect gets an HTTP error (a proxy answering 502 while the server
+   * restarts). Without this the tab would keep saving its own edits and never
+   * receive anyone else's.
+   */
+  private scheduleReconnect() {
+    if (!this.scene || this.reconnectTimer !== null) {
+      return;
+    }
+    const delay = Math.min(
+      MAX_RECONNECT_DELAY_MS,
+      1000 * 2 ** this.reconnectAttempts++,
+    );
+    this.reconnectTimer = window.setTimeout(() => {
+      this.reconnectTimer = null;
+      if (this.scene) {
+        this.openEvents();
+      }
+    }, delay);
+  }
+
+  private markStreamDown() {
+    this.streamDown = true;
+    appJotaiStore.set(cloudStatusAtom, { state: "offline" });
+  }
+
   private openEvents() {
     const scene = this.scene!;
+    // reopening after a failure: the next "hello" resyncs what was missed
+    this.closeEvents();
     const user = appJotaiStore.get(plusUserAtom);
     const events = new EventSource(
       plusAPI.eventsURL(scene.id, user ? null : "Guest"),
     );
     this.events = events;
+    this.lastEventAt = Date.now();
+    // connections can die without an error (sleeping laptop, a proxy
+    // dropping idle streams); the server's pings reveal that
+    this.watchdogTimer = window.setInterval(() => {
+      if (
+        this.events === events &&
+        !this.streamDown &&
+        Date.now() - this.lastEventAt > STREAM_STALE_MS
+      ) {
+        this.markStreamDown();
+        this.openEvents();
+      }
+    }, STREAM_WATCHDOG_MS);
 
     const on = (type: string, handler: (data: any) => void) =>
       events.addEventListener(type, (event) => {
         if (this.events !== events) {
           return;
         }
+        this.lastEventAt = Date.now();
         try {
           handler(JSON.parse((event as MessageEvent).data));
         } catch (error) {
@@ -422,7 +496,10 @@ class CloudSession {
         }
       });
 
+    on("ping", () => {});
     on("hello", (data) => {
+      this.streamDown = false;
+      this.reconnectAttempts = 0;
       appJotaiStore.set(connectionIdAtom, data.connectionId);
       if (this.connectedOnce) {
         this.resync();
@@ -497,8 +574,12 @@ class CloudSession {
       events.close();
     });
     events.onerror = () => {
-      if (this.events === events) {
-        appJotaiStore.set(cloudStatusAtom, { state: "offline" });
+      if (this.events !== events) {
+        return;
+      }
+      this.markStreamDown();
+      if (events.readyState === EventSource.CLOSED) {
+        this.scheduleReconnect();
       }
     };
   }
