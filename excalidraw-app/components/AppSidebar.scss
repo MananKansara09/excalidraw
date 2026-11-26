@@ -89,4 +89,15 @@
       overflow: visible;
     }
   }
+
+  // let long comment lists scroll inside the sidebar instead of being clipped
+  .sidebar-tabs-root {
+    min-height: 0;
+  }
+
+  .app-sidebar-comments-tab {
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
 }
