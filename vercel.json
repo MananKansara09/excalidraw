@@ -72,6 +72,10 @@
     {
       "source": "/signin",
       "destination": "/index.html"
+    },
+    {
+      "source": "/dashboard",
+      "destination": "/index.html"
     }
   ],
   "framework": null,

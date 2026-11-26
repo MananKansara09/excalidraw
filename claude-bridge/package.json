@@ -1,0 +1,17 @@
+{
+  "name": "excalidraw-claude-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local bridge that lets the Excalidraw Claude panel talk to the user's own Claude Code login via the Claude Agent SDK",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.332",
+    "zod": "^4.0.0"
+  }
+}

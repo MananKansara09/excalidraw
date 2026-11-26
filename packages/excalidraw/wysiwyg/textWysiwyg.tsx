@@ -83,6 +83,8 @@ import {
   actionZoomOut,
 } from "../actions/actionCanvas";
 
+import { createMentionSuggestions } from "./mentionSuggestions";
+
 import type { ParsedDataTranferList } from "../clipboard";
 
 import type App from "../components/App";
@@ -961,7 +963,24 @@ export const textWysiwyg = ({
     };
   }
 
+  // `@` suggests the users in the shared (collaborators) list
+  const mentions = editorBox
+    ? createMentionSuggestions({
+        editable,
+        container: editorBox,
+        getCollaborators: () => app.state.collaborators,
+        getCaretViewportBounds: () => {
+          const bounds = getCaretViewportBounds();
+          return bounds && { left: bounds.left, bottom: bounds.bottom };
+        },
+        getContainerOffsetLeft: () => app.viewport.getSidebarInsets().left,
+      })
+    : null;
+
   editable.onkeydown = (event) => {
+    if (mentions?.handleKeyDown(event)) {
+      return;
+    }
     if (!event.shiftKey && actionZoomIn.keyTest(event)) {
       event.preventDefault();
       app.actionManager.executeAction(
@@ -1244,6 +1263,7 @@ export const textWysiwyg = ({
     editable.onblur = null;
     editable.oninput = null;
     editable.onkeydown = null;
+    mentions?.destroy();
 
     if (observer) {
       observer.disconnect();
