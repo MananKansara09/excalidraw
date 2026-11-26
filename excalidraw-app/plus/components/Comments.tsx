@@ -24,13 +24,15 @@ import {
 } from "../state";
 
 import {
+  AvatarContent,
   ErrorText,
-  initials,
+  PlusAvatar,
   SmallButton,
   timeAgo,
   useAsyncAction,
 } from "./ui";
 
+import { CommentPopover } from "./CommentPopover";
 import { CommentBody, MentionInput, mentionsInText } from "./MentionInput";
 
 import type { Mention, Person, PlusComment } from "../api";
@@ -89,15 +91,43 @@ const Thread = ({
   people: Person[];
 }) => {
   const [reply, setReply] = useState("");
+  const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [replyMentions, setReplyMentions] = useState<Mention[]>([]);
   const { pending, error, run } = useAsyncAction();
   const ref = useRef<HTMLLIElement>(null);
+  const setActive = useSetAtom(activeCommentIdAtom);
+  const [flash, setFlash] = useState(false);
+
+  const highlight = () => {
+    ref.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+    // restart the animation even when the same thread is clicked again
+    setFlash(false);
+    requestAnimationFrame(() => setFlash(true));
+  };
 
   useEffect(() => {
     if (active) {
-      ref.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      highlight();
     }
   }, [active]);
+
+  useEffect(() => {
+    if (!flash) {
+      return;
+    }
+    const timeout = setTimeout(() => setFlash(false), 1600);
+    return () => clearTimeout(timeout);
+  }, [flash]);
+
+  // clicking a thread (resolved ones have no pin) jumps to it on the canvas
+  const onThreadClick = (event: React.MouseEvent) => {
+    if ((event.target as HTMLElement).closest("button, input, textarea, a")) {
+      return;
+    }
+    setActive(thread.id);
+    highlight();
+    focusThread(api, thread);
+  };
 
   const sendReply = async () => {
     const text = reply.trim();
@@ -121,50 +151,100 @@ const Thread = ({
   return (
     <li
       ref={ref}
-      className={clsx("plus-thread", { resolved: thread.resolved, active })}
+      className={clsx("plus-thread", {
+        resolved: thread.resolved,
+        active,
+        flash,
+      })}
+      onClick={onThreadClick}
     >
-      {[thread, ...replies].map((comment) => (
-        <div key={comment.id} className="plus-comment">
-          <div className="plus-comment__meta">
-            <span className="plus-avatar small" aria-hidden="true">
-              {initials(comment.author.name)}
-            </span>
-            <strong>{comment.author.name}</strong>
-            <span className="plus-muted">{timeAgo(comment.createdAt)}</span>
-            {(comment.author.id === userId || canModerate) && (
-              <button
-                className="plus-icon-text danger"
-                title="Delete comment"
-                onClick={() => {
-                  if (
-                    comment.parentId ||
-                    window.confirm("Delete this thread and its replies?")
-                  ) {
-                    run(() => plusAPI.deleteComment(comment.id));
-                  }
-                }}
-              >
-                Delete
-              </button>
-            )}
-          </div>
-          <div className="plus-comment__body">
-            <CommentBody
-              body={comment.body}
-              mentions={comment.mentions}
-              myUserId={userId}
+      {[thread, ...replies].map((comment) => {
+        // only the person who wrote a comment can delete it
+        const isOwn = !!userId && comment.author.id === userId;
+        const confirming = confirmingId === comment.id;
+        return (
+          <div
+            key={comment.id}
+            className={clsx("plus-comment", { reply: !!comment.parentId })}
+          >
+            <PlusAvatar
+              name={comment.author.name}
+              avatarUrl={comment.author.avatarUrl}
+              size="small"
             />
+            <div className="plus-comment__main">
+              <div className="plus-comment__meta">
+                <strong className="plus-comment__author">
+                  {comment.author.name}
+                </strong>
+                <span className="plus-muted">{timeAgo(comment.createdAt)}</span>
+                {isOwn && !confirming && (
+                  <button
+                    className="plus-comment__delete"
+                    title="Delete comment"
+                    aria-label="Delete comment"
+                    onClick={() => setConfirmingId(comment.id)}
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      width="14"
+                      height="14"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v5M14 11v5" />
+                    </svg>
+                  </button>
+                )}
+                {isOwn && confirming && (
+                  <span className="plus-comment__confirm">
+                    <span>
+                      {comment.parentId ? "Delete?" : "Delete thread?"}
+                    </span>
+                    <button
+                      className="danger"
+                      onClick={() => {
+                        setConfirmingId(null);
+                        run(() => plusAPI.deleteComment(comment.id));
+                      }}
+                    >
+                      Yes
+                    </button>
+                    <button onClick={() => setConfirmingId(null)}>No</button>
+                  </span>
+                )}
+              </div>
+              <div className="plus-comment__body">
+                <CommentBody
+                  body={comment.body}
+                  mentions={comment.mentions}
+                  myUserId={userId}
+                />
+              </div>
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
       <div className="plus-thread__actions">
         {(thread.elementId || thread.x !== null) && (
-          <SmallButton onClick={() => focusThread(api, thread)}>
-            Show
-          </SmallButton>
+          <button
+            className="plus-thread__action"
+            onClick={() => {
+              setActive(thread.id);
+              highlight();
+              focusThread(api, thread);
+            }}
+          >
+            Show on canvas
+          </button>
         )}
         {(canModerate || thread.author.id === userId) && (
-          <SmallButton
+          <button
+            className="plus-thread__action"
             onClick={() =>
               run(() =>
                 plusAPI.updateComment(thread.id, {
@@ -174,7 +254,7 @@ const Thread = ({
             }
           >
             {thread.resolved ? "Reopen" : "Resolve"}
-          </SmallButton>
+          </button>
         )}
       </div>
       {userId && !thread.resolved && (
@@ -386,11 +466,21 @@ export const CommentsPanel = ({ api }: { api: ExcalidrawImperativeAPI }) => {
   );
 };
 
+const POPOVER_WIDTH = 320;
+const POPOVER_HEIGHT = 380;
+
 /** Pins for open threads, drawn over the canvas. */
 export const CommentPins = ({ api }: { api: ExcalidrawImperativeAPI }) => {
   const comments = useAtomValue(commentsAtom);
-  const setActive = useSetAtom(activeCommentIdAtom);
+  const scene = useAtomValue(cloudSceneAtom);
+  const user = useAtomValue(plusUserAtom);
+  const [activeId, setActive] = useAtom(activeCommentIdAtom);
   const [, setTick] = useState(0);
+  const [people, setPeople] = useState<Person[]>([]);
+  // `hoverId` follows the pointer; `stickyId` stays until closed (click)
+  const [hoverId, setHoverId] = useState<string | null>(null);
+  const [stickyId, setStickyId] = useState<string | null>(null);
+  const closeTimer = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     let frame = 0;
@@ -407,7 +497,50 @@ export const CommentPins = ({ api }: { api: ExcalidrawImperativeAPI }) => {
     };
   }, [api]);
 
-  const open = comments.filter((c) => !c.parentId && !c.resolved);
+  useEffect(() => () => window.clearTimeout(closeTimer.current), []);
+
+  const sceneId = scene?.id;
+  useEffect(() => {
+    if (!sceneId || !user) {
+      setPeople([]);
+      return;
+    }
+    let cancelled = false;
+    plusAPI
+      .listPeople(sceneId)
+      .then((result) => {
+        if (!cancelled) {
+          setPeople(result.people.filter((p) => p.userId !== user.id));
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [sceneId, user]);
+
+  // a comment link (or the inbox) asks for a thread to be shown
+  useEffect(() => {
+    if (activeId) {
+      setStickyId(activeId);
+    }
+  }, [activeId]);
+
+  const keepOpen = () => window.clearTimeout(closeTimer.current);
+  const leave = () => {
+    keepOpen();
+    closeTimer.current = window.setTimeout(() => setHoverId(null), 250);
+  };
+  const close = () => {
+    keepOpen();
+    setHoverId(null);
+    setStickyId(null);
+    setActive(null);
+  };
+
+  const open = comments
+    .filter((c) => !c.parentId && !c.resolved)
+    .sort((a, b) => a.createdAt - b.createdAt);
   if (!open.length) {
     return null;
   }
@@ -420,12 +553,71 @@ export const CommentPins = ({ api }: { api: ExcalidrawImperativeAPI }) => {
       .getSceneElements()
       .map((element) => [element.id, element as ExcalidrawElement]),
   );
-  const replyCounts = new Map<string, number>();
+  const repliesByThread = new Map<string, PlusComment[]>();
   for (const comment of comments) {
     if (comment.parentId) {
-      replyCounts.set(
-        comment.parentId,
-        (replyCounts.get(comment.parentId) ?? 0) + 1,
+      repliesByThread.set(comment.parentId, [
+        ...(repliesByThread.get(comment.parentId) ?? []),
+        comment,
+      ]);
+    }
+  }
+
+  const shownId = hoverId ?? stickyId;
+  const shownIndex = open.findIndex((thread) => thread.id === shownId);
+  const shown = shownIndex >= 0 ? open[shownIndex] : null;
+  const canModerate = scene?.role === "owner" || scene?.role === "editor";
+
+  const step = (delta: number) => {
+    const next = open[(shownIndex + delta + open.length) % open.length];
+    setHoverId(null);
+    setStickyId(next.id);
+    focusThread(api, next);
+  };
+
+  const toViewport = (comment: PlusComment) => {
+    const anchor = getAnchor(comment, elementsMap);
+    return anchor
+      ? sceneCoordsToViewportCoords(
+          { sceneX: anchor.x, sceneY: anchor.y },
+          appState,
+        )
+      : null;
+  };
+
+  let popover: React.ReactElement | null = null;
+  if (shown) {
+    const point = toViewport(shown);
+    if (point) {
+      const maxLeft = window.innerWidth - POPOVER_WIDTH - 8;
+      // open to the right of the pin, flipped when it would leave the screen
+      const left =
+        point.x + 14 + POPOVER_WIDTH > window.innerWidth
+          ? Math.max(8, point.x - 14 - POPOVER_WIDTH)
+          : Math.min(point.x + 14, maxLeft);
+      const top = Math.max(
+        8,
+        Math.min(point.y - 28, window.innerHeight - POPOVER_HEIGHT - 8),
+      );
+      popover = (
+        <CommentPopover
+          key={shown.id}
+          thread={shown}
+          replies={repliesByThread.get(shown.id) ?? []}
+          position={{ left, top }}
+          userId={user?.id ?? null}
+          canModerate={canModerate}
+          people={people}
+          myName={user?.name ?? ""}
+          myAvatarUrl={user?.avatarUrl ?? null}
+          index={shownIndex}
+          total={open.length}
+          onPrev={() => step(-1)}
+          onNext={() => step(1)}
+          onClose={close}
+          onPointerEnter={keepOpen}
+          onPointerLeave={leave}
+        />
       );
     }
   }
@@ -433,14 +625,11 @@ export const CommentPins = ({ api }: { api: ExcalidrawImperativeAPI }) => {
   return (
     <div className="plus-pins" aria-label="Comment pins">
       {open.map((thread) => {
-        const anchor = getAnchor(thread, elementsMap);
-        if (!anchor) {
+        const point = toViewport(thread);
+        if (!point) {
           return null;
         }
-        const { x, y } = sceneCoordsToViewportCoords(
-          { sceneX: anchor.x, sceneY: anchor.y },
-          appState,
-        );
+        const { x, y } = point;
         if (
           x < appState.offsetLeft ||
           y < appState.offsetTop ||
@@ -449,29 +638,40 @@ export const CommentPins = ({ api }: { api: ExcalidrawImperativeAPI }) => {
         ) {
           return null;
         }
-        const replies = replyCounts.get(thread.id) ?? 0;
+        const replies = repliesByThread.get(thread.id)?.length ?? 0;
         return (
           <button
             key={thread.id}
-            className="plus-pin"
+            className={clsx("plus-pin", {
+              active: thread.id === shownId,
+              "has-avatar": !!thread.author.avatarUrl,
+            })}
             style={{ left: x, top: y }}
-            title={`${thread.author.name}: ${thread.body}`}
+            aria-label={`Comment by ${thread.author.name}`}
+            aria-expanded={thread.id === shownId}
+            onPointerEnter={() => {
+              keepOpen();
+              setHoverId(thread.id);
+            }}
+            onPointerLeave={leave}
+            onFocus={() => setHoverId(thread.id)}
             onClick={() => {
-              setActive(thread.id);
-              api.toggleSidebar({
-                name: "default",
-                tab: "comments",
-                force: true,
-              });
+              setStickyId((id) => (id === thread.id ? null : thread.id));
+              setHoverId(null);
             }}
           >
-            {initials(thread.author.name)}
+            <AvatarContent
+              name={thread.author.name}
+              avatarUrl={thread.author.avatarUrl}
+              imgClassName="plus-pin__avatar"
+            />
             {replies > 0 && (
               <span className="plus-pin__count">{replies + 1}</span>
             )}
           </button>
         );
       })}
+      {popover}
     </div>
   );
 };

@@ -142,7 +142,12 @@ export const loadSceneForRole = (
   return { scene, role };
 };
 
-export type Person = { userId: string; name: string; email: string };
+export type Person = {
+  userId: string;
+  name: string;
+  email: string;
+  avatarUrl: string | null;
+};
 
 /**
  * Everyone with an account who can open the scene: its owner, people it's
@@ -150,14 +155,19 @@ export type Person = { userId: string; name: string; email: string };
  * included: links are anonymous.)
  */
 export const getScenePeople = (db: DB, scene: SceneRow): Person[] => {
-  const rows = all<{ id: string; name: string; email: string }>(
+  const rows = all<{
+    id: string;
+    name: string;
+    email: string;
+    avatar_url: string | null;
+  }>(
     db,
-    `SELECT id, name, email FROM users WHERE id = ?
+    `SELECT id, name, email, avatar_url FROM users WHERE id = ?
      UNION
-     SELECT users.id, users.name, users.email FROM scene_access
+     SELECT users.id, users.name, users.email, users.avatar_url FROM scene_access
        JOIN users ON users.id = scene_access.user_id WHERE scene_access.scene_id = ?
      UNION
-     SELECT users.id, users.name, users.email FROM team_members
+     SELECT users.id, users.name, users.email, users.avatar_url FROM team_members
        JOIN users ON users.id = team_members.user_id WHERE team_members.team_id = ?
      ORDER BY name`,
     scene.owner_id,
@@ -168,6 +178,7 @@ export const getScenePeople = (db: DB, scene: SceneRow): Person[] => {
     userId: row.id,
     name: row.name,
     email: row.email,
+    avatarUrl: row.avatar_url ?? null,
   }));
 };
 
