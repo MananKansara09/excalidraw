@@ -1605,8 +1605,8 @@ const ExcalidrawWrapper = () => {
                 setNotificationCenterOpen(true);
               },
             },
-            },
             {
+              label: "YouTube",
               icon: youtubeIcon,
               category: DEFAULT_CATEGORIES.links,
               predicate: true,
