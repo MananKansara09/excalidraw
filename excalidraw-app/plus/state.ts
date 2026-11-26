@@ -6,7 +6,6 @@ import type { PlusComment, PlusUser, SceneRole } from "./api";
 export const plusUserAtom = atom<PlusUser | null | undefined>(undefined);
 
 export type PlusDialog =
-  | { name: "auth"; mode: "signin" | "signup"; reason?: string }
   | { name: "workspace" }
   | { name: "account" }
   | { name: "share" }

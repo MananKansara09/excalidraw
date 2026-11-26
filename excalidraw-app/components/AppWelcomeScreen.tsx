@@ -6,6 +6,7 @@ import React from "react";
 
 import { useAtomValue, useSetAtom } from "../app-jotai";
 import { isExcalidrawPlusSignedUser } from "../app_constants";
+import { goToSignIn } from "../plus/auth";
 import { plusDialogAtom, plusUserAtom } from "../plus/state";
 
 export const AppWelcomeScreen: React.FC<{
@@ -79,7 +80,7 @@ export const AppWelcomeScreen: React.FC<{
           ) : (
             plusUser === null && (
               <WelcomeScreen.Center.MenuItem
-                onSelect={() => setPlusDialog({ name: "auth", mode: "signup" })}
+                onSelect={() => goToSignIn("signup")}
                 shortcut={null}
                 icon={loginIcon}
               >

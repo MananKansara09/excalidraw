@@ -68,6 +68,10 @@
     {
       "source": "/excalidraw-plus-export",
       "destination": "/index.html"
+    },
+    {
+      "source": "/signin",
+      "destination": "/index.html"
     }
   ],
   "framework": null,

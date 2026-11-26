@@ -9,6 +9,8 @@ import {
   plusUserAtom,
 } from "../state";
 
+import { goToSignIn } from "../auth";
+
 import { HangoutButtons } from "./HangoutControls";
 import { initials } from "./ui";
 
@@ -131,10 +133,7 @@ export const PlusTopRight = () => {
           </button>
         </>
       ) : (
-        <button
-          className="plus-pill-button"
-          onClick={() => setDialog({ name: "auth", mode: "signin" })}
-        >
+        <button className="plus-pill-button" onClick={() => goToSignIn()}>
           Sign in
         </button>
       )}

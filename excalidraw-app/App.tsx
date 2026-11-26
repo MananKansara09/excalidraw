@@ -148,7 +148,9 @@ import { ExcalidrawPlusIframeExport } from "./ExcalidrawPlusIframeExport";
 import "./index.scss";
 
 import { AppSidebar } from "./components/AppSidebar";
+import { goToSignIn } from "./plus/auth";
 import { cloudSession, parseCloudHash } from "./plus/cloud";
+import { SignInPage } from "./plus/SignInPage";
 import { PlusRoot, usePlusSession } from "./plus/components/PlusRoot";
 import { PlusTopRight } from "./plus/components/PlusTopRight";
 import { hangout } from "./plus/hangout";
@@ -256,12 +258,8 @@ const initializeScene = async (opts: {
     } catch (error: any) {
       cloudSession.stop();
       if (error?.status === 401 && cloudHash.sceneId) {
-        // private scene: sign in, then it opens (see AuthDialog)
-        appJotaiStore.set(plusDialogAtom, {
-          name: "auth",
-          mode: "signin",
-          reason: "Sign in to open this scene.",
-        });
+        // private scene: sign in, then come back to it
+        goToSignIn("signin", "scene");
       } else {
         window.history.replaceState({}, APP_NAME, window.location.origin);
       }
@@ -1006,9 +1004,7 @@ const ExcalidrawWrapper = () => {
         "signup",
       ],
       perform: () =>
-        setPlusDialog(
-          plusUser ? { name: "workspace" } : { name: "auth", mode: "signin" },
-        ),
+        plusUser ? setPlusDialog({ name: "workspace" }) : goToSignIn(),
     },
     {
       label: "Save to workspace",
@@ -1432,6 +1428,9 @@ const ExcalidrawApp = () => {
     window.location.pathname === APP_ROUTES.excalidrawPlusExport;
   if (isCloudExportWindow) {
     return <ExcalidrawPlusIframeExport />;
+  }
+  if (window.location.pathname === APP_ROUTES.signIn) {
+    return <SignInPage />;
   }
 
   return (

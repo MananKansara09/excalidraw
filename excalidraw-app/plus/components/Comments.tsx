@@ -13,6 +13,7 @@ import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 
 import { useAtom, useAtomValue, useSetAtom } from "../../app-jotai";
 import { plusAPI } from "../api";
+import { goToSignIn } from "../auth";
 import {
   activeCommentIdAtom,
   cloudSceneAtom,
@@ -218,11 +219,7 @@ export const CommentsPanel = ({ api }: { api: ExcalidrawImperativeAPI }) => {
         <FilledButton
           label={user ? "Save to workspace" : "Sign in"}
           onClick={() =>
-            setDialog(
-              user
-                ? { name: "save-to-cloud" }
-                : { name: "auth", mode: "signin" },
-            )
+            user ? setDialog({ name: "save-to-cloud" }) : goToSignIn()
           }
         />
       </div>
@@ -291,9 +288,7 @@ export const CommentsPanel = ({ api }: { api: ExcalidrawImperativeAPI }) => {
       ) : (
         <div className="plus-sidebar-empty">
           <p className="plus-muted">Sign in to join the discussion.</p>
-          <SmallButton
-            onClick={() => setDialog({ name: "auth", mode: "signin" })}
-          >
+          <SmallButton onClick={() => goToSignIn("signin", "comment")}>
             Sign in
           </SmallButton>
         </div>

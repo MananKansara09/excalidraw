@@ -1,3 +1,4 @@
+import { safeNextURL } from "../plus/auth";
 import { parseCloudHash } from "../plus/cloud";
 import { getOrderedFrames } from "../plus/export/frames";
 import { createPdf } from "../plus/export/pdf";
@@ -153,5 +154,23 @@ describe("createPptx", () => {
     );
     expect(entries.get("ppt/media/image2.jpeg")).toEqual(JPEG);
     expect(text("[Content_Types].xml")).toContain("/ppt/slides/slide2.xml");
+  });
+});
+
+describe("safeNextURL", () => {
+  it("allows same-origin paths only", () => {
+    expect(safeNextURL("/#cloud=abc")).toBe("/#cloud=abc");
+    expect(safeNextURL("/?x=1#share=t")).toBe("/?x=1#share=t");
+    for (const unsafe of [
+      "https://evil.example",
+      "//evil.example",
+      "/\\evil.example",
+      // eslint-disable-next-line no-script-url
+      "javascript:alert(1)",
+      "",
+      null,
+    ]) {
+      expect(safeNextURL(unsafe)).toBe("/");
+    }
   });
 });

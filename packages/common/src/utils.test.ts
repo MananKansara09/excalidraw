@@ -44,6 +44,30 @@ describe("@excalidraw/common/utils", () => {
     });
   });
 
+  describe("isWritableElement()", () => {
+    it("treats text-entry inputs as writable, other inputs not", () => {
+      const input = (type: string) => {
+        const element = document.createElement("input");
+        element.type = type;
+        return element;
+      };
+      for (const type of [
+        "text",
+        "number",
+        "password",
+        "search",
+        "email",
+        "url",
+        "tel",
+      ]) {
+        expect(isWritableElement(input(type))).toBe(true);
+      }
+      for (const type of ["checkbox", "radio", "range", "color", "button"]) {
+        expect(isWritableElement(input(type))).toBe(false);
+      }
+    });
+  });
+
   describe("isTransparent()", () => {
     it("should return true when color is rgb transparent", () => {
       expect(isTransparent("#ff00")).toEqual(true);

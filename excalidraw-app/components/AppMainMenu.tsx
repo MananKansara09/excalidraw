@@ -16,6 +16,7 @@ import type { Theme } from "@excalidraw/element/types";
 
 import { useAtomValue, useSetAtom } from "../app-jotai";
 import { LanguageList } from "../app-language/LanguageList";
+import { goToSignIn } from "../plus/auth";
 import {
   cloudSceneAtom,
   plusDialogAtom,
@@ -104,7 +105,7 @@ export const AppMainMenu: React.FC<{
         <MainMenu.Item
           icon={loginIcon}
           className="highlighted"
-          onSelect={() => setDialog({ name: "auth", mode: "signin" })}
+          onSelect={() => goToSignIn()}
         >
           {t("labels.signIn")} / {t("labels.signUp")}
         </MainMenu.Item>

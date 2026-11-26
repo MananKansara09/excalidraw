@@ -78,7 +78,7 @@ It creates a throwaway account (`smoke-<timestamp>@example.invalid`) and scene, 
 
 Use two browsers, or one normal and one private window:
 
-1. **Account**: click **Sign in → Create an account**. The Workspace opens.
+1. **Account**: click **Sign in**: it opens the `/signin` page. Choose **Create an account**; afterwards you're back on the canvas, signed in. Copy and paste work in the fields.
 2. **Cloud save**: click **New scene**, draw a rectangle. The top bar shows **Saved**. Reload the page: the drawing is still there.
 3. **Folders**: in **Workspace**, create a folder and move the scene into it.
 4. **Sharing**: click **Share → Create edit link**, open it in the second window. Draw in one window: the change appears in the other within a second, and each window shows the other person's avatar.

@@ -13,9 +13,9 @@ import {
   plusUserAtom,
 } from "../state";
 import { hangout } from "../hangout";
+import { goToSignIn } from "../auth";
 
 import { AccountDialog } from "./AccountDialog";
-import { AuthDialog } from "./AuthDialog";
 import { CloudShareDialog } from "./CloudShareDialog";
 import { CommentPins } from "./Comments";
 import { ExportFramesDialog } from "./ExportFramesDialog";
@@ -181,19 +181,13 @@ export const PlusRoot = ({ api }: { api: ExcalidrawImperativeAPI }) => {
       dialog &&
       ["workspace", "account", "save-to-cloud"].includes(dialog.name)
     ) {
-      setDialog({
-        name: "auth",
-        mode: "signin",
-        reason: "Sign in to use your workspace.",
-      });
+      setDialog(null);
+      goToSignIn("signin", "workspace");
     }
   }, [user, dialog, setDialog]);
 
   return (
     <>
-      {dialog?.name === "auth" && (
-        <AuthDialog mode={dialog.mode} reason={dialog.reason} />
-      )}
       {dialog?.name === "workspace" && user && (
         <WorkspaceDialog excalidrawAPI={api} />
       )}

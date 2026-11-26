@@ -8,4 +8,6 @@
  */
 export const APP_ROUTES = {
   excalidrawPlusExport: "/excalidraw-plus-export",
+  /** Sign in / sign up for the Plus server (`excalidraw-app/plus`). */
+  signIn: "/signin",
 } as const;
