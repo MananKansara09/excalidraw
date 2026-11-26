@@ -131,7 +131,7 @@ const Thread = ({
             </span>
             <strong>{comment.author.name}</strong>
             <span className="plus-muted">{timeAgo(comment.createdAt)}</span>
-            {(comment.author.id === userId || canModerate) && (
+            {userId && comment.author.id === userId && (
               <button
                 className="plus-icon-text danger"
                 title="Delete comment"

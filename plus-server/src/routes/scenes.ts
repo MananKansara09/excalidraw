@@ -821,17 +821,9 @@ export const registerSceneRoutes = (router: Router, ctx: AppContext) => {
   router.delete("/api/v1/comments/:commentId", (req) => {
     const user = requireUser(db, req);
     const comment = loadComment(ctx, req.params.commentId);
-    const { role } = loadSceneForRole(
-      db,
-      req,
-      user,
-      comment.scene_id,
-      "viewer",
-    );
-    if (comment.author_id !== user.id && role !== "owner") {
-      throw forbidden(
-        "Only the author or the scene owner can delete a comment",
-      );
+    loadSceneForRole(db, req, user, comment.scene_id, "viewer");
+    if (comment.author_id !== user.id) {
+      throw forbidden("Only the author can delete a comment");
     }
     run(db, "DELETE FROM comments WHERE id = ?", comment.id);
     hub.broadcast(sceneChannel(comment.scene_id), "comment", {
