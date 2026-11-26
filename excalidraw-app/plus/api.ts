@@ -45,6 +45,19 @@ export type SceneDetail = SceneSummary & {
   appState: Record<string, unknown>;
   presentation: string[];
   files?: Record<string, PlusFile>;
+  /** Opened through a presentation link: only the slides were sent. */
+  slidesOnly?: boolean;
+};
+
+export type LinkKind = "full" | "presentation";
+
+export type LivePresentation = {
+  sceneId: string;
+  name: string;
+  presenter: string;
+  slide: number;
+  viewers: number;
+  hasPublicLink: boolean;
 };
 
 export type PlusFile = {
@@ -98,6 +111,7 @@ export type SceneAccess = {
   links: {
     token: string;
     role: "editor" | "viewer";
+    kind: LinkKind;
     createdAt: number;
     url: string | null;
   }[];
@@ -352,19 +366,28 @@ export const plusAPI = {
     plusFetch<SceneAccess>(`/scenes/${id}/access/${userId}`, {
       method: "DELETE",
     }),
-  createLink: (id: string, role: "editor" | "viewer") =>
+  createLink: (
+    id: string,
+    role: "editor" | "viewer",
+    kind: LinkKind = "full",
+  ) =>
     plusFetch<SceneAccess>(`/scenes/${id}/links`, {
       method: "POST",
-      body: { role },
+      body: { role, kind },
     }),
   revokeLink: (id: string, token: string) =>
     plusFetch<SceneAccess>(`/scenes/${id}/links/${token}`, {
       method: "DELETE",
     }),
   resolveShareLink: (token: string) =>
-    plusFetch<{ sceneId: string; role: "editor" | "viewer" }>(
-      `/share/${token}`,
-    ),
+    plusFetch<{
+      sceneId: string;
+      role: "editor" | "viewer";
+      kind: LinkKind;
+      live: boolean;
+    }>(`/share/${token}`),
+  livePresentations: () =>
+    plusFetch<{ presentations: LivePresentation[] }>("/presentations/live"),
 
   // comments
   listComments: (sceneId: string) =>

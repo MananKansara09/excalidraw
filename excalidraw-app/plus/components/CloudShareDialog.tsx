@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useAtomValue, useSetAtom } from "../../app-jotai";
 import { plusAPI } from "../api";
 import { getShareURL } from "../cloud";
-import { cloudSceneAtom, plusDialogAtom } from "../state";
+import { cloudSceneAtom, participantsAtom, plusDialogAtom } from "../state";
 
 import {
   CopyField,
@@ -31,6 +31,8 @@ const embedCode = (token: string) =>
 export const CloudShareDialog = () => {
   const setDialog = useSetAtom(plusDialogAtom);
   const scene = useAtomValue(cloudSceneAtom);
+  const participants = useAtomValue(participantsAtom);
+  const live = participants.find((p) => p.presenting);
   const [access, setAccess] = useState<SceneAccess | null>(null);
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<"editor" | "viewer">("editor");
@@ -52,10 +54,16 @@ export const CloudShareDialog = () => {
   const update = (promise: Promise<SceneAccess>) =>
     run(async () => setAccess(await promise));
 
+  const presentationLinks =
+    access?.links.filter((link) => link.kind === "presentation") ?? [];
   const viewLinks =
-    access?.links.filter((link) => link.role === "viewer") ?? [];
+    access?.links.filter(
+      (link) => link.kind === "full" && link.role === "viewer",
+    ) ?? [];
   const editLinks =
-    access?.links.filter((link) => link.role === "editor") ?? [];
+    access?.links.filter(
+      (link) => link.kind === "full" && link.role === "editor",
+    ) ?? [];
 
   return (
     <Dialog
@@ -159,6 +167,46 @@ export const CloudShareDialog = () => {
                   </li>
                 ))}
               </ul>
+            </section>
+
+            <section className="plus-section">
+              <h3>
+                Public presentation{" "}
+                {live && <span className="plus-live-badge">Live</span>}
+              </h3>
+              <p className="plus-muted">
+                Anyone with the link can watch your slides, no account needed.
+                They see only the frames, never the rest of the canvas or its
+                comments. When you present, they follow along live.
+              </p>
+              {presentationLinks.map((link) => (
+                <div key={link.token} className="plus-link-block">
+                  <CopyField
+                    value={getShareURL(link.token)}
+                    label="Presentation link"
+                  />
+                  <CopyField value={embedCode(link.token)} label="Embed code" />
+                  <SmallButton
+                    danger
+                    onClick={() =>
+                      update(plusAPI.revokeLink(scene.id, link.token))
+                    }
+                  >
+                    Stop sharing
+                  </SmallButton>
+                </div>
+              ))}
+              {!presentationLinks.length && (
+                <SmallButton
+                  onClick={() =>
+                    update(
+                      plusAPI.createLink(scene.id, "viewer", "presentation"),
+                    )
+                  }
+                >
+                  Create presentation link
+                </SmallButton>
+              )}
             </section>
 
             <section className="plus-section">

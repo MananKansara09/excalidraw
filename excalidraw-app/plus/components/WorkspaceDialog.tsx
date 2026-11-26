@@ -12,6 +12,7 @@ import { cloudSceneHash } from "../cloud";
 import {
   cloudSceneAtom,
   mentionsUnreadAtom,
+  pendingWatchAtom,
   plusDialogAtom,
   plusUserAtom,
 } from "../state";
@@ -20,7 +21,13 @@ import { MentionsPanel } from "./MentionsPanel";
 import { TeamPanel } from "./TeamPanel";
 import { ErrorText, SmallButton, timeAgo, useAsyncAction } from "./ui";
 
-import type { Folder, PlusFile, SceneSummary, TeamSummary } from "../api";
+import type {
+  Folder,
+  LivePresentation,
+  PlusFile,
+  SceneSummary,
+  TeamSummary,
+} from "../api";
 
 type View =
   | { kind: "personal" }
@@ -76,6 +83,30 @@ export const WorkspaceDialog = ({
   const [user] = useAtom(plusUserAtom);
   const cloudScene = useAtomValue(cloudSceneAtom);
   const unreadMentions = useAtomValue(mentionsUnreadAtom);
+  const setPendingWatch = useSetAtom(pendingWatchAtom);
+  const [live, setLive] = useState<LivePresentation[]>([]);
+
+  // presentations running right now, refreshed while the dialog is open
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = () =>
+      plusAPI
+        .livePresentations()
+        .then((result) => !cancelled && setLive(result.presentations))
+        .catch(() => {});
+    refresh();
+    const interval = setInterval(refresh, 10_000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, []);
+
+  const watchPresentation = (sceneId: string) => {
+    setPendingWatch({ sceneId });
+    setDialog(null);
+    openCloudScene(sceneId);
+  };
 
   const [view, setView] = useState<View>(
     cloudScene?.teamId
@@ -300,6 +331,34 @@ export const WorkspaceDialog = ({
             />
           ) : (
             <>
+              {live.length > 0 && (
+                <section
+                  className="plus-live-list"
+                  aria-label="Presentations running now"
+                >
+                  <h3>
+                    <span className="plus-live-badge">Live</span> Presenting now
+                  </h3>
+                  <ul>
+                    {live.map((item) => (
+                      <li key={item.sceneId}>
+                        <span className="plus-live-list__main">
+                          <span className="plus-scene__name">{item.name}</span>
+                          <span className="plus-muted">
+                            {item.presenter} · {item.viewers} watching
+                            {item.hasPublicLink ? " · public link on" : ""}
+                          </span>
+                        </span>
+                        <SmallButton
+                          onClick={() => watchPresentation(item.sceneId)}
+                        >
+                          Watch
+                        </SmallButton>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
               <div className="plus-toolbar">
                 <input
                   type="search"
@@ -453,7 +512,12 @@ export const WorkspaceDialog = ({
                           openCloudScene(scene.id);
                         }}
                       >
-                        <span className="plus-scene__name">{scene.name}</span>
+                        <span className="plus-scene__name">
+                          {scene.name}
+                          {live.some((item) => item.sceneId === scene.id) && (
+                            <span className="plus-live-badge">Live</span>
+                          )}
+                        </span>
                         <span className="plus-muted">
                           {scene.elementCount} elements · edited{" "}
                           {timeAgo(scene.updatedAt)}

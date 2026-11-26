@@ -153,7 +153,9 @@ class CloudSession {
       teamId: scene.teamId,
       presentation: scene.presentation,
       shareToken: hash.shareToken,
-      embed: hash.embed,
+      // a presentation-only link is shown like an embed: slides, no chrome
+      embed: hash.embed || !!scene.slidesOnly,
+      slidesOnly: !!scene.slidesOnly,
     };
     this.syncedVersions = new Map(
       scene.elements.map((element: ExcalidrawElement) => [
@@ -402,6 +404,8 @@ class CloudSession {
     }
   }
 
+  private refreshSlides = debounce(() => this.resync(), 250);
+
   private openEvents() {
     const scene = this.scene!;
     const user = appJotaiStore.get(plusUserAtom);
@@ -438,6 +442,8 @@ class CloudSession {
       // newcomers learn where everyone's pointer and selection are
       this.sendPointer();
     });
+    // presentation-only viewers aren't sent edits; they re-fetch their slides
+    on("scene-refresh", () => this.refreshSlides());
     on("scene-update", (data) => {
       this.applyRemoteElements(data.elements);
       if (data.appState?.viewBackgroundColor) {
@@ -486,6 +492,14 @@ class CloudSession {
       if (data.type === "pointer") {
         this.onRemotePointer(data.from, data.data);
         return;
+      }
+      if (data.type === "follow-slide") {
+        const slide = Number(data.data?.index) || 0;
+        appJotaiStore.set(participantsAtom, (participants) =>
+          participants.map((p) =>
+            p.connectionId === data.from ? { ...p, slide } : p,
+          ),
+        );
       }
       this.signalListeners.forEach((listener) => listener(data));
     });
@@ -651,6 +665,14 @@ class CloudSession {
     if (this.canEdit()) {
       await plusAPI.updateScene(this.scene.id, { presentation: frameIds });
     }
+  }
+
+  /** Tells everyone else this tab is presenting (and which slide). */
+  async announcePresentation(
+    type: "presentation-start" | "presentation-stop" | "follow-slide",
+    index: number,
+  ) {
+    await this.signal(type, { index });
   }
 
   // signaling ------------------------------------------------------------------

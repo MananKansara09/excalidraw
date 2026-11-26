@@ -14,6 +14,8 @@ import {
   participantsAtom,
   mentionsUnreadAtom,
   pendingCommentFocusAtom,
+  pendingWatchAtom,
+  presentationAtom,
   plusDialogAtom,
   plusUserAtom,
 } from "../state";
@@ -221,6 +223,62 @@ export const PlusRoot = ({ api }: { api: ExcalidrawImperativeAPI }) => {
       }
     }
   }, [participants, connectionId, hangoutState.joined, api]);
+
+  // someone starts presenting in a scene we have open: offer to watch
+  const [presentation, setPresentation] = useAtom(presentationAtom);
+  const [pendingWatch, setPendingWatch] = useAtom(pendingWatchAtom);
+  const announcedPresenters = useRef(new Set<string>());
+  const presenter = participants.find(
+    (p) => p.presenting && p.connectionId !== connectionId,
+  );
+  useEffect(() => {
+    if (!presenter) {
+      announcedPresenters.current.clear();
+      return;
+    }
+    if (
+      scene?.slidesOnly ||
+      presentation.active ||
+      announcedPresenters.current.has(presenter.connectionId)
+    ) {
+      return;
+    }
+    announcedPresenters.current.add(presenter.connectionId);
+    api.setToast({
+      message: `${presenter.name} is presenting`,
+      duration: 10000,
+      closable: true,
+      action: {
+        label: "Watch",
+        onClick: () =>
+          setPresentation({
+            active: true,
+            index: presenter.slide,
+            watching: true,
+          }),
+      },
+    });
+  }, [presenter, scene?.slidesOnly, presentation.active, api, setPresentation]);
+
+  // "Watch" chosen from the live list: start once the scene and presenter
+  // are here, and give up if they never show up
+  useEffect(() => {
+    if (!pendingWatch) {
+      return;
+    }
+    if (scene?.id === pendingWatch.sceneId && presenter) {
+      setPendingWatch(null);
+      announcedPresenters.current.add(presenter.connectionId);
+      setPresentation({
+        active: true,
+        index: presenter.slide,
+        watching: true,
+      });
+      return;
+    }
+    const timeout = setTimeout(() => setPendingWatch(null), 15_000);
+    return () => clearTimeout(timeout);
+  }, [pendingWatch, scene?.id, presenter, setPendingWatch, setPresentation]);
 
   // joined some other way (e.g. the top bar): the "Watch" prompt is done
   useEffect(() => {

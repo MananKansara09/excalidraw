@@ -16,6 +16,11 @@ export type Connection = {
   res: ServerResponse;
   inHangout: boolean;
   sharingScreen: boolean;
+  /** Joined through a presentation-only link: gets slides, never the scene. */
+  restricted: boolean;
+  /** This connection is running a presentation, on slide `slide`. */
+  presenting: boolean;
+  slide: number;
 };
 
 export type Participant = {
@@ -25,6 +30,8 @@ export type Participant = {
   color: string;
   inHangout: boolean;
   sharingScreen: boolean;
+  presenting: boolean;
+  slide: number;
 };
 
 const COLORS = [
@@ -46,6 +53,8 @@ export const BROADCAST_SIGNALS = [
   "screen-share-start",
   "screen-share-stop",
   "pointer",
+  "presentation-start",
+  "presentation-stop",
   "follow-slide",
 ] as const;
 
@@ -79,6 +88,7 @@ export class RealtimeHub {
     channel: string,
     res: ServerResponse,
     user: { id: string | null; name: string },
+    { restricted = false } = {},
   ): Connection {
     res.writeHead(200, {
       "Content-Type": "text/event-stream",
@@ -100,6 +110,9 @@ export class RealtimeHub {
       res,
       inHangout: false,
       sharingScreen: false,
+      restricted,
+      presenting: false,
+      slide: 0,
     };
     connections.set(connection.id, connection);
     this.send(connection, "hello", {
@@ -138,10 +151,52 @@ export class RealtimeHub {
       color: c.color,
       inHangout: c.inHangout,
       sharingScreen: c.sharingScreen,
+      presenting: c.presenting,
+      slide: c.slide,
     }));
   }
 
+  /** The connection currently presenting on a channel, if any. */
+  presenter(channel: string) {
+    for (const connection of this.channels.get(channel)?.values() ?? []) {
+      if (connection.presenting) {
+        return connection;
+      }
+    }
+    return null;
+  }
+
+  /** Channels with a live presentation. */
+  presentingChannels() {
+    const live = new Map<string, { presenter: Connection; viewers: number }>();
+    for (const [channel, connections] of this.channels) {
+      const presenter = this.presenter(channel);
+      if (presenter) {
+        live.set(channel, { presenter, viewers: connections.size - 1 });
+      }
+    }
+    return live;
+  }
+
   send(connection: Connection, event: string, data: unknown) {
+    if (connection.restricted) {
+      // Presentation-only viewers learn that the scene changed and re-fetch
+      // their filtered copy; they never get its elements or comments, nor
+      // pointers other than the presenter's.
+      if (event === "scene-update") {
+        event = "scene-refresh";
+        data = {};
+      } else if (event === "comment") {
+        return;
+      } else if (
+        event === "signal" &&
+        (data as { type?: string; from?: string })?.type === "pointer" &&
+        !this.get(connection.channel, (data as { from: string }).from)
+          ?.presenting
+      ) {
+        return;
+      }
+    }
     connection.res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
   }
 

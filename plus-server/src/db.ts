@@ -148,6 +148,8 @@ export const openDatabase = (path: string): DB => {
   // migrations for databases created before these columns existed
   ensureColumn(db, "comments", "mentions", "TEXT NOT NULL DEFAULT '[]'");
   ensureColumn(db, "users", "mentions_seen_at", "INTEGER NOT NULL DEFAULT 0");
+  // 'full' links open the whole scene; 'presentation' links only its slides
+  ensureColumn(db, "share_links", "kind", "TEXT NOT NULL DEFAULT 'full'");
   return db;
 };
 
