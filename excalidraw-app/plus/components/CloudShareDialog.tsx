@@ -2,9 +2,10 @@ import { Dialog } from "@excalidraw/excalidraw/components/Dialog";
 import { useEffect, useState } from "react";
 
 import { useAtomValue, useSetAtom } from "../../app-jotai";
+import { knownUsersAtom } from "../../notifications";
 import { plusAPI } from "../api";
 import { getShareURL } from "../cloud";
-import { cloudSceneAtom, plusDialogAtom } from "../state";
+import { cloudSceneAtom, plusDialogAtom, plusUserAtom } from "../state";
 
 import {
   CopyField,
@@ -31,6 +32,8 @@ const embedCode = (token: string) =>
 export const CloudShareDialog = () => {
   const setDialog = useSetAtom(plusDialogAtom);
   const scene = useAtomValue(cloudSceneAtom);
+  const currentUser = useAtomValue(plusUserAtom);
+  const knownUsers = useAtomValue(knownUsersAtom);
   const [access, setAccess] = useState<SceneAccess | null>(null);
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<"editor" | "viewer">("editor");
@@ -118,6 +121,53 @@ export const CloudShareDialog = () => {
                   Share
                 </SmallButton>
               </form>
+              {(() => {
+                const existingEmails = new Set([
+                  access.owner.email.toLowerCase(),
+                  ...access.collaborators.map((c) => c.email.toLowerCase()),
+                ]);
+                const quickAdd = knownUsers
+                  .filter(
+                    (u) =>
+                      u.email &&
+                      u.id !== currentUser?.id &&
+                      !existingEmails.has(u.email.toLowerCase()),
+                  )
+                  .slice(0, 5);
+                if (!quickAdd.length) {
+                  return null;
+                }
+                return (
+                  <div
+                    className="plus-muted"
+                    style={{
+                      display: "flex",
+                      flexWrap: "wrap",
+                      gap: "0.35rem",
+                      alignItems: "center",
+                    }}
+                  >
+                    <span>Quick assign:</span>
+                    {quickAdd.map((person) => (
+                      <SmallButton
+                        key={person.id}
+                        disabled={pending}
+                        onClick={() =>
+                          update(
+                            plusAPI.shareWithUser(
+                              scene.id,
+                              person.email!,
+                              role,
+                            ),
+                          )
+                        }
+                      >
+                        +{person.username}
+                      </SmallButton>
+                    ))}
+                  </div>
+                );
+              })()}
               <ul className="plus-list">
                 <li className="plus-list__row">
                   <PlusAvatar

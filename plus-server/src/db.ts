@@ -125,12 +125,35 @@ CREATE TABLE IF NOT EXISTS ai_usage (
   PRIMARY KEY (subject, day)
 );
 
+CREATE TABLE IF NOT EXISTS notifications (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  actor_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  actor_name TEXT NOT NULL,
+  actor_avatar_url TEXT,
+  type TEXT NOT NULL,
+  title TEXT NOT NULL,
+  message TEXT NOT NULL,
+  scene_id TEXT REFERENCES scenes(id) ON DELETE CASCADE,
+  scene_name TEXT,
+  team_id TEXT REFERENCES teams(id) ON DELETE CASCADE,
+  team_name TEXT,
+  comment_id TEXT,
+  element_id TEXT,
+  dedupe_key TEXT,
+  payload TEXT NOT NULL DEFAULT '{}',
+  read_at INTEGER,
+  created_at INTEGER NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_scenes_owner ON scenes(owner_id);
 CREATE INDEX IF NOT EXISTS idx_scenes_team ON scenes(team_id);
 CREATE INDEX IF NOT EXISTS idx_folders_owner ON folders(owner_id);
 CREATE INDEX IF NOT EXISTS idx_folders_team ON folders(team_id);
 CREATE INDEX IF NOT EXISTS idx_comments_scene ON comments(scene_id);
 CREATE INDEX IF NOT EXISTS idx_share_links_scene ON share_links(scene_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_user_dedupe ON notifications(user_id, dedupe_key) WHERE dedupe_key IS NOT NULL;
 `;
 
 /** Adds a column to a table created by an earlier version, if missing. */

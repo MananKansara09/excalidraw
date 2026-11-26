@@ -31,11 +31,19 @@
     font-family: var(--ui-font);
     animation: NotificationToast-slide-in 180ms ease-out;
 
-    &.is-share_invite {
+    &.is-share_invite,
+    &.is-scene_share,
+    &.is-scene_assigned {
       border-left: 3px solid #0fb884;
     }
 
-    &.is-canvas_mention {
+    &.is-team_added {
+      border-left: 3px solid #f08c00;
+    }
+
+    &.is-canvas_mention,
+    &.is-comment_mention,
+    &.is-comment_reply {
       border-left: 3px solid var(--color-primary);
     }
 

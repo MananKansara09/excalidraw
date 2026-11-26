@@ -10,6 +10,25 @@ import type { AppNotification } from "../types";
 
 const TOAST_AUTO_DISMISS_MS = 6000;
 
+const getToastMeta = (notification: AppNotification) => {
+  switch (notification.type) {
+    case "share_invite":
+      return { pill: "Share", cta: "Open" };
+    case "scene_share":
+    case "scene_assigned":
+      return { pill: "Scene", cta: "Open scene" };
+    case "team_added":
+      return { pill: "Team", cta: "Open team" };
+    case "comment_mention":
+    case "comment_reply":
+      return { pill: "Chat", cta: "Open chat" };
+    case "canvas_mention":
+      return { pill: "@Mention", cta: "View" };
+    case "system":
+      return { pill: "Notice", cta: notification.payload.actionLabel };
+  }
+};
+
 interface ToastCardProps {
   notification: AppNotification;
   onAction: (notification: AppNotification) => void;
@@ -33,8 +52,8 @@ const NotificationToastCard: React.FC<ToastCardProps> = ({
   };
 
   useEffect(() => {
-    scheduleDismiss();
     const ownerWin = cardRef.current?.ownerDocument.defaultView ?? window;
+    scheduleDismiss();
     return () => {
       if (timerRef.current !== null) {
         ownerWin.clearTimeout(timerRef.current);
@@ -43,12 +62,7 @@ const NotificationToastCard: React.FC<ToastCardProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [notification.id]);
 
-  const ctaLabel =
-    notification.type === "share_invite"
-      ? "Open"
-      : notification.type === "canvas_mention"
-      ? "View"
-      : notification.payload.actionLabel;
+  const { pill, cta } = getToastMeta(notification);
 
   return (
     <div
@@ -68,13 +82,7 @@ const NotificationToastCard: React.FC<ToastCardProps> = ({
     >
       <div className="NotificationToastCard__body">
         <div className="NotificationToastCard__title">
-          <span className="NotificationToastCard__pill">
-            {notification.type === "share_invite"
-              ? "Share"
-              : notification.type === "canvas_mention"
-              ? "@Mention"
-              : "Notice"}
-          </span>
+          <span className="NotificationToastCard__pill">{pill}</span>
           <span>{notification.title}</span>
         </div>
         <div className="NotificationToastCard__message">
@@ -83,7 +91,7 @@ const NotificationToastCard: React.FC<ToastCardProps> = ({
       </div>
 
       <div className="NotificationToastCard__actions">
-        {ctaLabel && (
+        {cta && (
           <button
             type="button"
             className="NotificationToastCard__cta"
@@ -92,7 +100,7 @@ const NotificationToastCard: React.FC<ToastCardProps> = ({
               onAction(notification);
             }}
           >
-            {ctaLabel}
+            {cta}
           </button>
         )}
         <button

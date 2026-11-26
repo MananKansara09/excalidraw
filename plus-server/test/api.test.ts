@@ -1300,3 +1300,200 @@ describe("user avatars", () => {
     bobStream.close();
   });
 });
+
+describe("notifications", () => {
+  test("pushes real-time notifications for team invites, scene shares, new/assigned scenes, canvas mentions, and chat replies", async () => {
+    const { api: alice, user: aliceUser } = await signUp(
+      server.base,
+      "notif-alice",
+    );
+    const { api: bob, user: bobUser } = await signUp(
+      server.base,
+      "notif-bob",
+    );
+    const { api: carol } = await signUp(server.base, "notif-carol");
+
+    const bobKey = (
+      await bob.post("/api/v1/me/api-keys", { name: "notif-sse" })
+    ).json.key;
+
+    const controller = new AbortController();
+    const sseRes = await fetch(`${server.base}/api/v1/notifications/events`, {
+      headers: { Authorization: `Bearer ${bobKey}` },
+      signal: controller.signal,
+    });
+    assert.equal(sseRes.status, 200);
+    const reader = sseRes.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    const pushed: any[] = [];
+    const nextEvent = async (eventName: string) => {
+      for (;;) {
+        const idx = pushed.findIndex((e) => e.event === eventName);
+        if (idx >= 0) {
+          return pushed.splice(idx, 1)[0].data;
+        }
+        const { value, done } = await reader.read();
+        if (done) {
+          throw new Error(`stream ended waiting for ${eventName}`);
+        }
+        buffer += decoder.decode(value, { stream: true });
+        const frames = buffer.split("\n\n");
+        buffer = frames.pop()!;
+        for (const frame of frames) {
+          const eventMatch = /^event: (.+)$/m.exec(frame);
+          const dataMatch = /^data: (.+)$/m.exec(frame);
+          if (eventMatch && dataMatch) {
+            pushed.push({
+              event: eventMatch[1],
+              data: JSON.parse(dataMatch[1]),
+            });
+          }
+        }
+      }
+    };
+    await nextEvent("hello");
+
+    // 1. Adding member to team notifies them in real time
+    const team = (
+      await alice.post("/api/v1/teams", { name: "Design Squad" })
+    ).json.team;
+    const inviteRes = await alice.post(`/api/v1/teams/${team.id}/invites`, {
+      email: bobUser.email,
+      role: "member",
+    });
+    assert.equal(inviteRes.status, 200);
+    const teamNotif = (await nextEvent("notification")).notification;
+    assert.equal(teamNotif.type, "team_added");
+    assert.equal(teamNotif.teamId, team.id);
+
+    // 2. Creating a new scene in the team with a canvas @mention notifies Bob
+    const sceneRes = await alice.post("/api/v1/scenes", {
+      name: "Roadmap Board",
+      teamId: team.id,
+      elements: [
+        {
+          id: "txt-mention-1",
+          type: "text",
+          x: 10,
+          y: 20,
+          text: `Hey @${bobUser.name} please review`,
+          originalText: `Hey @${bobUser.name} please review`,
+        },
+      ],
+    });
+    assert.equal(sceneRes.status, 200);
+    const scene = sceneRes.json.scene;
+
+    const sceneAssigned = (await nextEvent("notification")).notification;
+    const canvasMention = (await nextEvent("notification")).notification;
+    assert.deepEqual(
+      [sceneAssigned.type, canvasMention.type].sort(),
+      ["canvas_mention", "scene_assigned"],
+    );
+
+    // 3. Sharing / assigning a personal scene with Carol notifies Carol
+    const personalScene = (
+      await alice.post("/api/v1/scenes", { name: "Private Spec" })
+    ).json.scene;
+    const shareRes = await alice.post(
+      `/api/v1/scenes/${personalScene.id}/access`,
+      {
+        email: "notif-carol@example.com",
+        role: "editor",
+      },
+    );
+    assert.equal(shareRes.status, 200);
+    const carolInbox = (await carol.get("/api/v1/notifications")).json;
+    assert.equal(carolInbox.unread, 1);
+    assert.equal(carolInbox.notifications[0].type, "scene_share");
+    assert.equal(carolInbox.notifications[0].sceneId, personalScene.id);
+
+    // 4. Moving / assigning a personal scene to the team notifies Bob
+    await alice.patch(`/api/v1/scenes/${personalScene.id}`, {
+      teamId: team.id,
+    });
+    const reassigned = (await nextEvent("notification")).notification;
+    assert.equal(reassigned.type, "scene_assigned");
+    assert.equal(reassigned.sceneId, personalScene.id);
+
+    // 5. Syncing canvas mentions on an existing scene notifies & deduplicates
+    const syncRes = await alice.post(`/api/v1/scenes/${scene.id}/mentions/sync`, {
+      mentions: [
+        {
+          elementId: "txt-mention-2",
+          textSnippet: "Assigning @notif-bob here",
+          recipientNameOrHandle: bobUser.name,
+          x: 50,
+          y: 60,
+        },
+      ],
+    });
+    assert.equal(syncRes.status, 200);
+    assert.equal(syncRes.json.notified, 1);
+    const syncedCanvasNotif = (await nextEvent("notification")).notification;
+    assert.equal(syncedCanvasNotif.type, "canvas_mention");
+    assert.equal(syncedCanvasNotif.elementId, "txt-mention-2");
+
+    // Duplicate sync of same element/user is ignored
+    const dupSyncRes = await alice.post(
+      `/api/v1/scenes/${scene.id}/mentions/sync`,
+      {
+        mentions: [
+          {
+            elementId: "txt-mention-2",
+            textSnippet: "Assigning @notif-bob here",
+            recipientNameOrHandle: bobUser.name,
+          },
+        ],
+      },
+    );
+    assert.equal(dupSyncRes.json.notified, 0);
+
+    // 6. Comment @mention + thread reply notifications
+    const rootComment = (
+      await alice.post(`/api/v1/scenes/${scene.id}/comments`, {
+        body: `Hello @${bobUser.name}, what do you think?`,
+        mentions: [{ userId: bobUser.id, name: bobUser.name }],
+      })
+    ).json.comment;
+    const commentMentionNotif = (await nextEvent("notification")).notification;
+    assert.equal(commentMentionNotif.type, "comment_mention");
+    assert.equal(commentMentionNotif.commentId, rootComment.id);
+
+    // Bob replies to Alice's thread -> Alice gets comment_reply
+    await bob.post(`/api/v1/scenes/${scene.id}/comments`, {
+      body: "Looks good to me!",
+      parentId: rootComment.id,
+    });
+    const aliceInbox = (await alice.get("/api/v1/notifications")).json;
+    assert.ok(
+      aliceInbox.notifications.some(
+        (n: any) =>
+          n.type === "comment_reply" &&
+          n.commentId === rootComment.id &&
+          n.actor.id === bobUser.id,
+      ),
+    );
+    assert.ok(aliceUser.id);
+
+    // 7. Read / read-all / delete / clear endpoints
+    const bobListBefore = (await bob.get("/api/v1/notifications")).json;
+    assert.ok(bobListBefore.unread >= 5);
+    await bob.post(`/api/v1/notifications/${teamNotif.id}/read`);
+    const bobAfterOneRead = (await bob.get("/api/v1/notifications")).json;
+    assert.equal(bobAfterOneRead.unread, bobListBefore.unread - 1);
+
+    await bob.post("/api/v1/notifications/read-all");
+    assert.equal((await bob.get("/api/v1/notifications")).json.unread, 0);
+
+    await bob.delete(`/api/v1/notifications/${teamNotif.id}`);
+    await bob.delete("/api/v1/notifications");
+    assert.equal(
+      (await bob.get("/api/v1/notifications")).json.notifications.length,
+      0,
+    );
+
+    controller.abort();
+  });
+});

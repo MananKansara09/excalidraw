@@ -10,6 +10,8 @@ import {
   requireString,
 } from "../http.ts";
 
+import { createAndPushNotification } from "./notifications.ts";
+
 import type { AppContext } from "../context.ts";
 import type { Router } from "../http.ts";
 import type { TeamRole } from "../access.ts";
@@ -174,6 +176,26 @@ export const registerTeamRoutes = (router: Router, ctx: AppContext) => {
         role,
         now(),
       );
+      const teamRow = get<{ name: string }>(
+        db,
+        "SELECT name FROM teams WHERE id = ?",
+        teamId,
+      );
+      if (teamRow) {
+        createAndPushNotification(ctx, {
+          userId: invitee.id,
+          actorId: user.id,
+          actorName: user.name,
+          actorAvatarUrl: user.avatar_url ?? null,
+          type: "team_added",
+          title: "Added to team",
+          message: `${user.name} added you to team "${teamRow.name}" as ${role}`,
+          teamId,
+          teamName: teamRow.name,
+          dedupeKey: `team-added:${teamId}:${invitee.id}:${now()}`,
+          payload: { role },
+        });
+      }
     } else {
       // joins automatically when they sign up with this email
       run(

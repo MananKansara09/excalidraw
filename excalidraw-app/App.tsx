@@ -150,16 +150,20 @@ import { ExcalidrawPlusIframeExport } from "./ExcalidrawPlusIframeExport";
 import "./index.scss";
 
 import { AppSidebar } from "./components/AppSidebar";
+import { plusAPI } from "./plus/api";
 import { goToSignIn } from "./plus/auth";
 import { cloudSession, parseCloudHash } from "./plus/cloud";
 import { SignInPage } from "./plus/SignInPage";
 import { PlusRoot, usePlusSession } from "./plus/components/PlusRoot";
 import { PlusTopRight } from "./plus/components/PlusTopRight";
+import { openCloudScene } from "./plus/components/WorkspaceDialog";
 import { hangout } from "./plus/hangout";
 import {
+  activeCommentIdAtom,
   cloudFollowedActivityAtom,
   cloudSceneAtom,
   cloudUserToFollowAtom,
+  pendingCommentFocusAtom,
   plusDialogAtom,
   plusUserAtom,
   presentationAtom,
@@ -168,6 +172,7 @@ import "./plus/plus.scss";
 import {
   notificationCenterOpenAtom,
   notificationEngine,
+  pendingTeamOpenAtom,
   type AppNotification,
 } from "./notifications";
 import { CanvasMentionAutocomplete } from "./notifications/components/CanvasMentionAutocomplete";
@@ -263,6 +268,7 @@ const initializeScene = async (opts: {
     try {
       const cloudScene = await cloudSession.load(cloudHash);
       cloudSession.start(opts.excalidrawAPI, cloudScene, cloudHash);
+      notificationEngine.seedCanvasElements(cloudScene.elements);
       return {
         scene: cloudSession.toInitialData(cloudScene, localDataState?.appState),
         isExternalScene: false,
@@ -478,11 +484,17 @@ const ExcalidrawWrapper = () => {
   const cloudScene = useAtomValue(cloudSceneAtom);
   const plusUser = useAtomValue(plusUserAtom);
   const setPlusDialog = useSetAtom(plusDialogAtom);
+  const setPendingTeamOpen = useSetAtom(pendingTeamOpenAtom);
+  const setPendingCommentFocus = useSetAtom(pendingCommentFocusAtom);
+  const setActiveCommentId = useSetAtom(activeCommentIdAtom);
   const setPresentation = useSetAtom(presentationAtom);
   const pendingMentionFocusRef = useRef<{
     elementId: string;
     containerId?: string | null;
   } | null>(null);
+  const handleSelectNotificationRef = useRef<
+    ((notification: AppNotification) => void) | null
+  >(null);
   const [isCollaborating] = useAtomWithInitialValue(isCollaboratingAtom, () => {
     return isCollaborationLink(window.location.href);
   });
@@ -665,7 +677,11 @@ const ExcalidrawWrapper = () => {
 
   useEffect(() => {
     void notificationEngine.init();
+    notificationEngine.setNativeActivationHandler((activated) => {
+      void handleSelectNotificationRef.current?.(activated);
+    });
     return () => {
+      notificationEngine.setNativeActivationHandler(null);
       notificationEngine.destroy();
     };
   }, []);
@@ -848,11 +864,27 @@ const ExcalidrawWrapper = () => {
       collabAPI.syncElements(elements);
     }
 
-    void notificationEngine.processCanvasElements(elements, {
-      editingElementId: appState.editingTextElement?.id ?? null,
-      roomId: collabAPI?.getRoomId() ?? null,
-      roomLink: collabAPI?.getActiveRoomLink() ?? null,
-    });
+    void notificationEngine
+      .processCanvasElements(elements, {
+        editingElementId: appState.editingTextElement?.id ?? null,
+        roomId: collabAPI?.getRoomId() ?? null,
+        roomLink: collabAPI?.getActiveRoomLink() ?? null,
+      })
+      .then((emitted) => {
+        if (cloudScene?.id && emitted.length > 0) {
+          void plusAPI
+            .syncCanvasMentions(cloudScene.id, {
+              mentions: emitted.map((item) => ({
+                elementId: item.payload.elementId,
+                textSnippet: item.payload.textSnippet,
+                recipientNameOrHandle: item.recipientHandle || "",
+                x: item.payload.x,
+                y: item.payload.y,
+              })),
+            })
+            .catch(() => {});
+        }
+      });
 
     if (pendingMentionFocusRef.current && excalidrawAPI) {
       const targetInfo = pendingMentionFocusRef.current;
@@ -1064,10 +1096,56 @@ const ExcalidrawWrapper = () => {
         return;
       }
 
+      if (
+        notification.type === "scene_share" ||
+        notification.type === "scene_assigned"
+      ) {
+        if (notification.payload.sceneId) {
+          openCloudScene(notification.payload.sceneId);
+        }
+        return;
+      }
+
+      if (notification.type === "team_added") {
+        if (notification.payload.teamId) {
+          setPendingTeamOpen(notification.payload.teamId);
+          setPlusDialog({ name: "workspace" });
+        }
+        return;
+      }
+
+      if (
+        notification.type === "comment_mention" ||
+        notification.type === "comment_reply"
+      ) {
+        const { sceneId, commentId } = notification.payload;
+        if (!sceneId) {
+          return;
+        }
+        if (cloudScene?.id === sceneId) {
+          setActiveCommentId(commentId);
+          excalidrawAPI?.toggleSidebar({
+            name: "default",
+            tab: "comments",
+            force: true,
+          });
+        } else {
+          setPendingCommentFocus({ sceneId, commentId });
+          openCloudScene(sceneId);
+        }
+        return;
+      }
+
       if (notification.type === "canvas_mention") {
-        const { elementId, containerId, roomId, roomLink } =
+        const { elementId, containerId, roomId, roomLink, sceneId } =
           notification.payload;
         const activeRoomId = collabAPI?.getRoomId() ?? null;
+
+        if (sceneId && cloudScene?.id !== sceneId) {
+          pendingMentionFocusRef.current = { elementId, containerId };
+          openCloudScene(sceneId);
+          return;
+        }
 
         if (roomId && roomLink && roomId !== activeRoomId) {
           pendingMentionFocusRef.current = { elementId, containerId };
@@ -1087,8 +1165,20 @@ const ExcalidrawWrapper = () => {
         }
       }
     },
-    [collabAPI, excalidrawAPI, focusCanvasElement, joinSharedRoomLink],
+    [
+      cloudScene?.id,
+      collabAPI,
+      excalidrawAPI,
+      focusCanvasElement,
+      joinSharedRoomLink,
+      setActiveCommentId,
+      setPendingCommentFocus,
+      setPendingTeamOpen,
+      setPlusDialog,
+    ],
   );
+
+  handleSelectNotificationRef.current = handleSelectNotification;
 
   // ---------------------------------------------------------------------------
   // onExport — intercepts file save to wait for pending image loads
@@ -1309,7 +1399,16 @@ const ExcalidrawWrapper = () => {
         renderTopRightUI={(isMobile) => {
           if (isMobile || !collabAPI || !isCollabAvailable || cloudScene) {
             // cloud scenes sync through the Plus server, not live rooms
-            return <PlusTopRight />;
+            return isMobile ? (
+              <PlusTopRight />
+            ) : (
+              <div className="excalidraw-ui-top-right">
+                <PlusTopRight />
+                <NotificationBell
+                  onSelectNotification={handleSelectNotification}
+                />
+              </div>
+            );
           }
 
           return (

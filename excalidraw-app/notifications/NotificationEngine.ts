@@ -14,10 +14,15 @@ import {
   saveKnownUsersToStorage,
 } from "./identity";
 import { MentionTracker } from "./mentionParser";
+import {
+  showNativeNotification,
+  syncNativeNotificationPermissionAtom,
+} from "./nativeNotifications";
 import { IndexedDBNotificationStorage } from "./storage";
 import {
   currentUserAtom,
   knownUsersAtom,
+  notificationCenterOpenAtom,
   notificationsAtom,
   notificationToastQueueAtom,
   sharedUsersByRoomAtom,
@@ -33,6 +38,7 @@ import type {
   CanvasMentionNotification,
   KnownUser,
   NotificationEventMap,
+  NotificationRemoteSyncAdapter,
   NotificationStorageAdapter,
   NotificationTransport,
   ShareInviteNotification,
@@ -102,6 +108,10 @@ export interface NotificationEngineOptions {
 
 export class NotificationEngine {
   private storage: NotificationStorageAdapter;
+  private remoteSync: NotificationRemoteSyncAdapter | null = null;
+  private nativeActivationHandler:
+    | ((notification: AppNotification) => void)
+    | null = null;
   private transports: NotificationTransport[] = [];
   private broadcastTransport: BroadcastChannelTransport | null = null;
   private socketTransport: SocketNotificationTransport | null = null;
@@ -168,6 +178,7 @@ export class NotificationEngine {
     if (typeof window !== "undefined") {
       window.addEventListener("online", this.handleOnline);
     }
+    syncNativeNotificationPermissionAtom();
   }
 
   private handleOnline = () => {
@@ -199,6 +210,16 @@ export class NotificationEngine {
     if (this.initialized) {
       transport.start((notification) => this.ingest(notification));
     }
+  }
+
+  setRemoteSyncAdapter(adapter: NotificationRemoteSyncAdapter | null) {
+    this.remoteSync = adapter;
+  }
+
+  setNativeActivationHandler(
+    handler: ((notification: AppNotification) => void) | null,
+  ) {
+    this.nativeActivationHandler = handler;
   }
 
   setSocketBridge(bridge: SocketNotificationBridge | null) {
@@ -246,6 +267,58 @@ export class NotificationEngine {
 
     this.broadcastTransport?.announcePresence(next);
     return next;
+  }
+
+  /**
+   * Aligns notification identity with an authenticated Plus account without
+   * overwriting local guest collab preferences.
+   */
+  async bindAuthenticatedUser(identity: UserIdentity): Promise<UserIdentity> {
+    const prev = this.getCurrentUser();
+    appJotaiStore.set(currentUserAtom, identity);
+    this.registerKnownUsers([
+      {
+        ...identity,
+        source: "self",
+        isOnline: true,
+      },
+    ]);
+
+    if (prev.id !== identity.id || prev.handle !== identity.handle) {
+      await this.loadInboxForIdentity(identity);
+    }
+    this.broadcastTransport?.announcePresence(identity);
+    return identity;
+  }
+
+  /**
+   * Hydrates historical notifications fetched from `plus-server` without
+   * popping toast or desktop notifications for already-stored items.
+   */
+  hydrateFromServer(serverItems: AppNotification[]) {
+    const identity = this.getCurrentUser();
+    const localItems = appJotaiStore
+      .get(notificationsAtom)
+      .filter((n) => n.source !== "server");
+
+    const mergedByKey = new Map<string, AppNotification>();
+    for (const item of [...serverItems, ...localItems]) {
+      this.seenIds.add(item.id);
+      this.dedupeIndex.set(item.dedupeKey, item.createdAt);
+      const existing = mergedByKey.get(item.id);
+      if (!existing || item.createdAt >= existing.createdAt) {
+        mergedByKey.set(item.id, item);
+      }
+    }
+
+    const sorted = this.applyRetentionPolicy(
+      Array.from(mergedByKey.values()).sort(
+        (a, b) => b.createdAt - a.createdAt,
+      ),
+    );
+    appJotaiStore.set(notificationsAtom, sorted);
+    this.schedulePersist(identity.handle, sorted);
+    this.emit("updated", sorted);
   }
 
   private async loadInboxForIdentity(identity: UserIdentity) {
@@ -727,6 +800,13 @@ export class NotificationEngine {
     this.emit("toast", notification);
     this.emit("updated", next);
 
+    showNativeNotification(notification, {
+      onActivate: (activated) => {
+        appJotaiStore.set(notificationCenterOpenAtom, true);
+        this.nativeActivationHandler?.(activated);
+      },
+    });
+
     return true;
   }
 
@@ -794,6 +874,7 @@ export class NotificationEngine {
       appJotaiStore.set(notificationsAtom, next);
       this.schedulePersist(this.getCurrentUser().handle, next);
       this.emit("updated", next);
+      void this.remoteSync?.markAsRead(id);
     }
 
     this.dismissToast(id);
@@ -815,6 +896,7 @@ export class NotificationEngine {
       appJotaiStore.set(notificationsAtom, next);
       this.schedulePersist(this.getCurrentUser().handle, next);
       this.emit("updated", next);
+      void this.remoteSync?.markAllAsRead();
     }
 
     appJotaiStore.set(notificationToastQueueAtom, []);
@@ -827,6 +909,7 @@ export class NotificationEngine {
       appJotaiStore.set(notificationsAtom, next);
       this.schedulePersist(this.getCurrentUser().handle, next);
       this.emit("updated", next);
+      void this.remoteSync?.dismiss(id);
     }
     this.dismissToast(id);
   }
@@ -835,6 +918,7 @@ export class NotificationEngine {
     appJotaiStore.set(notificationsAtom, []);
     appJotaiStore.set(notificationToastQueueAtom, []);
     void this.storage.clear(this.getCurrentUser().handle);
+    void this.remoteSync?.clearAll();
     this.emit("updated", []);
   }
 

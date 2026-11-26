@@ -140,6 +140,34 @@ export type MentionInboxItem = PlusComment & {
   unread: boolean;
 };
 
+export type ServerNotificationType =
+  | "scene_share"
+  | "scene_assigned"
+  | "team_added"
+  | "canvas_mention"
+  | "comment_mention"
+  | "comment_reply";
+
+export type ServerNotification = {
+  id: string;
+  userId: string;
+  actor: { id: string | null; name: string; avatarUrl: string | null };
+  type: ServerNotificationType;
+  title: string;
+  message: string;
+  sceneId: string | null;
+  sceneName: string | null;
+  teamId: string | null;
+  teamName: string | null;
+  commentId: string | null;
+  elementId: string | null;
+  dedupeKey: string | null;
+  payload: Record<string, unknown>;
+  read: boolean;
+  readAt: number | null;
+  createdAt: number;
+};
+
 export type ApiKey = {
   id: string;
   name: string;
@@ -411,6 +439,35 @@ export const plusAPI = {
     plusFetch<{ unread: number; mentions: MentionInboxItem[] }>("/me/mentions"),
   markMentionsSeen: () =>
     plusFetch("/me/mentions/seen", { method: "POST", body: {} }),
+  listNotifications: () =>
+    plusFetch<{ unread: number; notifications: ServerNotification[] }>(
+      "/notifications",
+    ),
+  markNotificationRead: (id: string) =>
+    plusFetch(`/notifications/${id}/read`, { method: "POST", body: {} }),
+  markAllNotificationsRead: () =>
+    plusFetch("/notifications/read-all", { method: "POST", body: {} }),
+  deleteNotification: (id: string) =>
+    plusFetch(`/notifications/${id}`, { method: "DELETE" }),
+  clearNotifications: () => plusFetch("/notifications", { method: "DELETE" }),
+  notificationEventsURL: () => `${PLUS_API_BASE}/notifications/events`,
+  syncCanvasMentions: (
+    sceneId: string,
+    body: {
+      mentions?: Array<{
+        elementId: string;
+        textSnippet: string;
+        recipientNameOrHandle: string;
+        x?: number;
+        y?: number;
+      }>;
+      elements?: readonly any[];
+    },
+  ) =>
+    plusFetch<{ ok: boolean; notified: number }>(
+      `/scenes/${sceneId}/mentions/sync`,
+      { method: "POST", body },
+    ),
   rtcConfig: () => plusFetch<{ iceServers: RTCIceServer[] }>("/rtc-config"),
 
   // realtime

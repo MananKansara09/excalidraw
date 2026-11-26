@@ -30,6 +30,11 @@ import {
 
 import { acceptWebSocket } from "../websocket.ts";
 
+import {
+  createAndPushNotification,
+  extractCanvasMentionsFromElements,
+} from "./notifications.ts";
+
 import type { IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
 import type { AppContext } from "../context.ts";
@@ -138,6 +143,72 @@ const shareLinkJSON = (
 export const registerSceneRoutes = (router: Router, ctx: AppContext) => {
   const { db, hub } = ctx;
 
+  const notifyTeamOnSceneAssigned = (
+    actor: User,
+    scene: SceneRow,
+    teamId: string,
+  ) => {
+    const team = get<{ name: string }>(
+      db,
+      "SELECT name FROM teams WHERE id = ?",
+      teamId,
+    );
+    if (!team) {
+      return;
+    }
+    const members = all<{ user_id: string }>(
+      db,
+      "SELECT user_id FROM team_members WHERE team_id = ?",
+      teamId,
+    );
+    for (const member of members) {
+      createAndPushNotification(ctx, {
+        userId: member.user_id,
+        actorId: actor.id,
+        actorName: actor.name,
+        actorAvatarUrl: actor.avatar_url ?? null,
+        type: "scene_assigned",
+        title: "New team scene",
+        message: `${actor.name} shared scene "${scene.name}" in team "${team.name}"`,
+        sceneId: scene.id,
+        sceneName: scene.name,
+        teamId,
+        teamName: team.name,
+        dedupeKey: `scene-assigned:${scene.id}:${teamId}:${member.user_id}`,
+      });
+    }
+  };
+
+  const notifyCanvasMentionsFromElements = (
+    actor: User,
+    scene: SceneRow,
+    elements: readonly any[],
+  ) => {
+    const people = getScenePeople(db, scene);
+    const hits = extractCanvasMentionsFromElements(elements, people);
+    for (const hit of hits) {
+      createAndPushNotification(ctx, {
+        userId: hit.userId,
+        actorId: actor.id,
+        actorName: actor.name,
+        actorAvatarUrl: actor.avatar_url ?? null,
+        type: "canvas_mention",
+        title: `Mentioned in ${scene.name}`,
+        message: `${actor.name} mentioned you on canvas: "${hit.textSnippet}"`,
+        sceneId: scene.id,
+        sceneName: scene.name,
+        elementId: hit.elementId,
+        dedupeKey: `canvas-mention:${scene.id}:${hit.elementId}:${hit.userId}`,
+        payload: {
+          elementId: hit.elementId,
+          textSnippet: hit.textSnippet,
+          x: hit.x,
+          y: hit.y,
+        },
+      });
+    }
+  };
+
   // scenes ---------------------------------------------------------------------
 
   router.get("/api/v1/scenes", (req) => {
@@ -174,6 +245,12 @@ export const registerSceneRoutes = (router: Router, ctx: AppContext) => {
       appState: body.appState,
       files: body.files,
     });
+    if (scene.team_id) {
+      notifyTeamOnSceneAssigned(user, scene, scene.team_id);
+    }
+    if (Array.isArray(body.elements) && body.elements.length > 0) {
+      notifyCanvasMentionsFromElements(user, scene, body.elements);
+    }
     return { scene: sceneDetail(db, scene, "owner") };
   });
 
@@ -281,7 +358,14 @@ export const registerSceneRoutes = (router: Router, ctx: AppContext) => {
         scene.id,
       );
     }
-    const updated = get<any>(db, "SELECT * FROM scenes WHERE id = ?", scene.id);
+    const updated = get<SceneRow>(
+      db,
+      "SELECT * FROM scenes WHERE id = ?",
+      scene.id,
+    )!;
+    if (moving && updated.team_id && updated.team_id !== scene.team_id) {
+      notifyTeamOnSceneAssigned(user, updated, updated.team_id);
+    }
     hub.broadcast(sceneChannel(scene.id), "scene-meta", {
       name: updated.name,
       presentation: JSON.parse(updated.presentation),
@@ -422,6 +506,21 @@ export const registerSceneRoutes = (router: Router, ctx: AppContext) => {
       invitee.id,
       role,
     );
+    createAndPushNotification(ctx, {
+      userId: invitee.id,
+      actorId: user.id,
+      actorName: user.name,
+      actorAvatarUrl: user.avatar_url ?? null,
+      type: "scene_share",
+      title: "Scene shared with you",
+      message: `${user.name} added you as ${role} on "${scene.name}"`,
+      sceneId: scene.id,
+      sceneName: scene.name,
+      dedupeKey: `scene-share:${scene.id}:${invitee.id}:${role}:${Math.floor(
+        now() / 5000,
+      )}`,
+      payload: { role },
+    });
     return accessList(scene.id);
   });
 
@@ -612,34 +711,165 @@ export const registerSceneRoutes = (router: Router, ctx: AppContext) => {
 
   /**
    * Keeps the mentions that name someone with access and still appear in the
-   * text as "@Name"; anything else a client sends is dropped.
+   * text as "@Name" (from explicit mentions list OR inline @handle/@name/@email).
    */
   const resolveMentions = (
     scene: SceneRow,
     mentions: unknown,
     text: string,
   ) => {
-    if (!Array.isArray(mentions)) {
-      return [];
-    }
-    const people = new Map(
-      getScenePeople(db, scene).map((person) => [person.userId, person]),
-    );
+    const peopleList = getScenePeople(db, scene);
+    const people = new Map(peopleList.map((person) => [person.userId, person]));
     const seen = new Set<string>();
     const result: { userId: string; name: string }[] = [];
-    for (const mention of mentions) {
-      const person = people.get(mention?.userId);
+
+    if (Array.isArray(mentions)) {
+      for (const mention of mentions) {
+        const person = people.get(mention?.userId);
+        if (
+          person &&
+          !seen.has(person.userId) &&
+          text.toLowerCase().includes(`@${person.name.toLowerCase()}`)
+        ) {
+          seen.add(person.userId);
+          result.push({ userId: person.userId, name: person.name });
+        }
+      }
+    }
+
+    // Also resolve inline @mentions typed directly without picking autocomplete
+    const textLower = text.toLowerCase();
+    for (const person of peopleList) {
+      if (seen.has(person.userId)) {
+        continue;
+      }
+      const handle = person.name
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, "_")
+        .replace(/[^a-z0-9._-]/g, "");
+      const emailLocal = person.email.split("@")[0]?.toLowerCase();
       if (
-        person &&
-        !seen.has(person.userId) &&
-        text.includes(`@${person.name}`)
+        textLower.includes(`@${person.name.toLowerCase()}`) ||
+        (handle && textLower.includes(`@${handle}`)) ||
+        (emailLocal && textLower.includes(`@${emailLocal}`))
       ) {
         seen.add(person.userId);
         result.push({ userId: person.userId, name: person.name });
       }
     }
+
     return result;
   };
+
+  router.post("/api/v1/scenes/:sceneId/mentions/sync", async (req) => {
+    const user = requireUser(db, req);
+    const { scene } = loadSceneForRole(
+      db,
+      req,
+      user,
+      req.params.sceneId,
+      "editor",
+    );
+    const body = await req.body();
+    const people = getScenePeople(db, scene);
+    let notified = 0;
+
+    if (Array.isArray(body.elements)) {
+      const hits = extractCanvasMentionsFromElements(body.elements, people);
+      for (const hit of hits) {
+        const created = createAndPushNotification(ctx, {
+          userId: hit.userId,
+          actorId: user.id,
+          actorName: user.name,
+          actorAvatarUrl: user.avatar_url ?? null,
+          type: "canvas_mention",
+          title: `Mentioned in ${scene.name}`,
+          message: `${user.name} mentioned you on canvas: "${hit.textSnippet}"`,
+          sceneId: scene.id,
+          sceneName: scene.name,
+          elementId: hit.elementId,
+          dedupeKey: `canvas-mention:${scene.id}:${hit.elementId}:${hit.userId}`,
+          payload: {
+            elementId: hit.elementId,
+            textSnippet: hit.textSnippet,
+            x: hit.x,
+            y: hit.y,
+          },
+        });
+        if (created) {
+          notified++;
+        }
+      }
+    }
+
+    if (Array.isArray(body.mentions)) {
+      const normalize = (val: string) =>
+        val
+          .trim()
+          .replace(/^@+/, "")
+          .toLowerCase()
+          .replace(/\s+/g, "_")
+          .replace(/[^a-z0-9._-]/g, "");
+
+      for (const item of body.mentions) {
+        const elementId = optionalString(item?.elementId, "elementId");
+        const target = optionalString(
+          item?.recipientNameOrHandle,
+          "recipientNameOrHandle",
+        );
+        const textSnippet =
+          typeof item?.textSnippet === "string"
+            ? item.textSnippet.slice(0, 140)
+            : "";
+        if (!elementId || !target) {
+          continue;
+        }
+        const targetNorm = normalize(target);
+        const matchedPeople =
+          targetNorm === "everyone" || targetNorm === "all"
+            ? people
+            : people.filter((person) => {
+                const handle = normalize(person.name);
+                const first = normalize(person.name.split(/\s+/)[0] || "");
+                const emailLocal = normalize(person.email.split("@")[0] || "");
+                return (
+                  person.userId === target ||
+                  handle === targetNorm ||
+                  first === targetNorm ||
+                  emailLocal === targetNorm
+                );
+              });
+
+        for (const person of matchedPeople) {
+          const created = createAndPushNotification(ctx, {
+            userId: person.userId,
+            actorId: user.id,
+            actorName: user.name,
+            actorAvatarUrl: user.avatar_url ?? null,
+            type: "canvas_mention",
+            title: `Mentioned in ${scene.name}`,
+            message: `${user.name} mentioned you on canvas: "${textSnippet}"`,
+            sceneId: scene.id,
+            sceneName: scene.name,
+            elementId,
+            dedupeKey: `canvas-mention:${scene.id}:${elementId}:${person.userId}`,
+            payload: {
+              elementId,
+              textSnippet,
+              x: typeof item.x === "number" ? item.x : undefined,
+              y: typeof item.y === "number" ? item.y : undefined,
+            },
+          });
+          if (created) {
+            notified++;
+          }
+        }
+      }
+    }
+
+    return { ok: true, notified };
+  });
 
   router.get("/api/v1/scenes/:sceneId/people", (req) => {
     const user = requireUser(db, req);
@@ -768,6 +998,70 @@ export const registerSceneRoutes = (router: Router, ctx: AppContext) => {
       action: "upsert",
       comment,
     });
+
+    const snippet =
+      text.length > 100 ? `${text.slice(0, 100).trim()}…` : text;
+    const targetCommentId = parentId ?? id;
+    const mentionedIds = new Set<string>();
+
+    for (const mention of mentions) {
+      mentionedIds.add(mention.userId);
+      createAndPushNotification(ctx, {
+        userId: mention.userId,
+        actorId: user.id,
+        actorName: user.name,
+        actorAvatarUrl: user.avatar_url ?? null,
+        type: "comment_mention",
+        title: `Mentioned in ${scene.name}`,
+        message: `${user.name} mentioned you in chat: "${snippet}"`,
+        sceneId: scene.id,
+        sceneName: scene.name,
+        commentId: targetCommentId,
+        elementId: comment.elementId,
+        dedupeKey: `comment-mention:${id}:${mention.userId}`,
+        payload: {
+          commentId: targetCommentId,
+          elementId: comment.elementId,
+          textSnippet: snippet,
+        },
+      });
+    }
+
+    if (parentId) {
+      const threadParticipants = all<{ author_id: string }>(
+        db,
+        `SELECT DISTINCT author_id FROM comments WHERE id = ? OR parent_id = ?`,
+        parentId,
+        parentId,
+      );
+      for (const participant of threadParticipants) {
+        if (
+          participant.author_id !== user.id &&
+          !mentionedIds.has(participant.author_id)
+        ) {
+          createAndPushNotification(ctx, {
+            userId: participant.author_id,
+            actorId: user.id,
+            actorName: user.name,
+            actorAvatarUrl: user.avatar_url ?? null,
+            type: "comment_reply",
+            title: `New reply in ${scene.name}`,
+            message: `${user.name} replied on "${scene.name}": "${snippet}"`,
+            sceneId: scene.id,
+            sceneName: scene.name,
+            commentId: targetCommentId,
+            elementId: comment.elementId,
+            dedupeKey: `comment-reply:${id}:${participant.author_id}`,
+            payload: {
+              commentId: targetCommentId,
+              elementId: comment.elementId,
+              textSnippet: snippet,
+            },
+          });
+        }
+      }
+    }
+
     return { comment };
   });
 

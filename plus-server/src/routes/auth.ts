@@ -20,6 +20,8 @@ import {
   unauthorized,
 } from "../http.ts";
 
+import { createAndPushNotification } from "./notifications.ts";
+
 import type { AppContext } from "../context.ts";
 import type { Router } from "../http.ts";
 import type { User } from "../auth.ts";
@@ -73,7 +75,12 @@ const validateAvatarUrl = (value: unknown): string | null => {
 
 /** Moves pending team invites for this email into memberships. */
 const acceptPendingInvites = (ctx: AppContext, user: User) => {
-  const invites = all<{ id: string; team_id: string; role: string }>(
+  const invites = all<{
+    id: string;
+    team_id: string;
+    role: string;
+    invited_by: string;
+  }>(
     ctx.db,
     "SELECT * FROM team_invites WHERE email = ?",
     user.email,
@@ -87,6 +94,33 @@ const acceptPendingInvites = (ctx: AppContext, user: User) => {
       invite.role,
       now(),
     );
+    const teamRow = get<{ name: string }>(
+      ctx.db,
+      "SELECT name FROM teams WHERE id = ?",
+      invite.team_id,
+    );
+    const inviter = get<{ name: string; avatar_url: string | null }>(
+      ctx.db,
+      "SELECT name, avatar_url FROM users WHERE id = ?",
+      invite.invited_by,
+    );
+    if (teamRow) {
+      createAndPushNotification(ctx, {
+        userId: user.id,
+        actorId: invite.invited_by,
+        actorName: inviter?.name ?? "A teammate",
+        actorAvatarUrl: inviter?.avatar_url ?? null,
+        type: "team_added",
+        title: "Added to team",
+        message: `${
+          inviter?.name ?? "A teammate"
+        } added you to team "${teamRow.name}" as ${invite.role}`,
+        teamId: invite.team_id,
+        teamName: teamRow.name,
+        dedupeKey: `team-invite-accepted:${invite.team_id}:${user.id}:${invite.id}`,
+        payload: { role: invite.role },
+      });
+    }
     run(ctx.db, "DELETE FROM team_invites WHERE id = ?", invite.id);
   }
 };

@@ -4,4 +4,5 @@ export * from "./storage";
 export * from "./transports";
 export * from "./mentionParser";
 export * from "./store";
+export * from "./nativeNotifications";
 export * from "./NotificationEngine";

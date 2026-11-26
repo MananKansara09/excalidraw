@@ -56,6 +56,29 @@
       gap: 0.5rem;
     }
 
+    &__desktopBar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+      padding: 0.45rem 0.875rem;
+      border-bottom: 1px solid var(--default-border-color);
+      background-color: rgba(105, 101, 219, 0.06);
+      font-size: 0.725rem;
+    }
+
+    &__desktopToggle {
+      display: flex;
+      align-items: center;
+      gap: 0.45rem;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    &__desktopBlocked {
+      opacity: 0.7;
+    }
+
     &__identityForm {
       display: flex;
       align-items: center;
@@ -181,6 +204,11 @@
       &.is-mention {
         background-color: rgba(105, 101, 219, 0.15);
         color: var(--color-primary);
+      }
+
+      &.is-team {
+        background-color: rgba(240, 140, 0, 0.15);
+        color: #d97706;
       }
 
       &.is-system {

@@ -82,4 +82,43 @@ describe("Notification UI components", () => {
       screen.queryByTestId("notification-unread-badge"),
     ).not.toBeInTheDocument();
   });
+
+  it("filters team/share notifications and renders desktop alert prompt when permission is default", () => {
+    const onSelectNotification = vi.fn();
+
+    render(
+      <Provider store={appJotaiStore}>
+        <div className="excalidraw">
+          <NotificationBell onSelectNotification={onSelectNotification} />
+        </div>
+      </Provider>,
+    );
+
+    act(() => {
+      notificationEngine.ingest({
+        id: "ntf-team-ui",
+        type: "team_added",
+        title: "Added to team",
+        message: 'Bob added you to team "Design"',
+        sender: { id: "u-bob", username: "Bob", handle: "bob" },
+        recipientHandle: "alice",
+        createdAt: Date.now(),
+        read: false,
+        dedupeKey: "ui-team-1",
+        priority: "high",
+        payload: { teamId: "team-1", teamName: "Design", role: "member" },
+      });
+    });
+
+    fireEvent.click(screen.getByTestId("notification-bell-button"));
+    fireEvent.click(screen.getByRole("tab", { name: "Teams" }));
+    expect(
+      screen.getByText('Bob added you to team "Design"'),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Open team" }));
+    expect(onSelectNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "ntf-team-ui", type: "team_added" }),
+    );
+  });
 });

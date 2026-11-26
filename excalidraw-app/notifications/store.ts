@@ -36,3 +36,27 @@ export const knownUsersAtom = atom<KnownUser[]>(loadKnownUsersFromStorage());
 export const sharedUsersByRoomAtom = atom<
   Record<string, SharedCollaboratorEntry[]>
 >({});
+
+export const nativeNotificationPermissionAtom = atom<
+  NotificationPermission | "unsupported"
+>(
+  typeof window !== "undefined" && typeof Notification !== "undefined"
+    ? Notification.permission
+    : "unsupported",
+);
+
+export const nativeNotificationsEnabledAtom = atom<boolean>(
+  (() => {
+    try {
+      const raw =
+        typeof localStorage !== "undefined"
+          ? localStorage.getItem("excalidraw-native-notifications-enabled")
+          : null;
+      return raw === null ? true : raw === "true";
+    } catch {
+      return true;
+    }
+  })(),
+);
+
+export const pendingTeamOpenAtom = atom<string | null>(null);

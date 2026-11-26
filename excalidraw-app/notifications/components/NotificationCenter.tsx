@@ -2,9 +2,16 @@ import clsx from "clsx";
 import React, { useMemo, useState } from "react";
 
 import { useAtom, useAtomValue } from "../../app-jotai";
+import { plusUserAtom } from "../../plus/state";
 import { notificationEngine } from "../NotificationEngine";
 import {
+  requestNativeNotificationPermission,
+  setNativeNotificationPreference,
+} from "../nativeNotifications";
+import {
   currentUserAtom,
+  nativeNotificationPermissionAtom,
+  nativeNotificationsEnabledAtom,
   notificationFilterAtom,
   notificationsAtom,
   unreadNotificationCountAtom,
@@ -37,11 +44,39 @@ const formatRelativeTime = (timestamp: number): string => {
 const getTypeBadge = (type: AppNotification["type"]) => {
   switch (type) {
     case "share_invite":
+    case "scene_share":
       return { label: "Share", className: "is-share" };
+    case "scene_assigned":
+      return { label: "Scene", className: "is-share" };
+    case "team_added":
+      return { label: "Team", className: "is-team" };
+    case "comment_mention":
+      return { label: "Chat @", className: "is-mention" };
+    case "comment_reply":
+      return { label: "Reply", className: "is-mention" };
     case "canvas_mention":
       return { label: "@Mention", className: "is-mention" };
     default:
       return { label: "System", className: "is-system" };
+  }
+};
+
+const getActionLabel = (notification: AppNotification): string | undefined => {
+  switch (notification.type) {
+    case "share_invite":
+      return "Open canvas";
+    case "scene_share":
+    case "scene_assigned":
+      return "Open scene";
+    case "team_added":
+      return "Open team";
+    case "comment_mention":
+    case "comment_reply":
+      return "Open chat";
+    case "canvas_mention":
+      return "Jump to mention";
+    case "system":
+      return notification.payload.actionLabel;
   }
 };
 
@@ -54,9 +89,12 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
   onSelectNotification,
 }) => {
   const currentUser = useAtomValue(currentUserAtom);
+  const plusUser = useAtomValue(plusUserAtom);
   const notifications = useAtomValue(notificationsAtom);
   const unreadCount = useAtomValue(unreadNotificationCountAtom);
   const [filter, setFilter] = useAtom(notificationFilterAtom);
+  const nativePermission = useAtomValue(nativeNotificationPermissionAtom);
+  const nativeEnabled = useAtomValue(nativeNotificationsEnabledAtom);
 
   const [isEditingIdentity, setIsEditingIdentity] = useState(false);
   const [nameDraft, setNameDraft] = useState(currentUser.username);
@@ -65,10 +103,22 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
     switch (filter) {
       case "unread":
         return notifications.filter((n) => !n.read);
-      case "canvas_mention":
-        return notifications.filter((n) => n.type === "canvas_mention");
-      case "share_invite":
-        return notifications.filter((n) => n.type === "share_invite");
+      case "mentions":
+        return notifications.filter(
+          (n) =>
+            n.type === "canvas_mention" ||
+            n.type === "comment_mention" ||
+            n.type === "comment_reply",
+        );
+      case "shares":
+        return notifications.filter(
+          (n) =>
+            n.type === "share_invite" ||
+            n.type === "scene_share" ||
+            n.type === "scene_assigned",
+        );
+      case "teams":
+        return notifications.filter((n) => n.type === "team_added");
       default:
         return notifications;
     }
@@ -87,8 +137,9 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
   const filters: Array<{ key: NotificationFilter; label: string }> = [
     { key: "all", label: "All" },
     { key: "unread", label: `Unread (${unreadCount})` },
-    { key: "canvas_mention", label: "Mentions" },
-    { key: "share_invite", label: "Shares" },
+    { key: "mentions", label: "Mentions" },
+    { key: "shares", label: "Shares" },
+    { key: "teams", label: "Teams" },
   ];
 
   return (
@@ -125,7 +176,14 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
       </div>
 
       <div className="NotificationCenter__identityBar">
-        {isEditingIdentity ? (
+        {plusUser ? (
+          <div className="NotificationCenter__identitySummary">
+            <span>
+              Signed in as <strong>{plusUser.name}</strong> (
+              <code>@{currentUser.handle}</code>)
+            </span>
+          </div>
+        ) : isEditingIdentity ? (
           <form
             className="NotificationCenter__identityForm"
             onSubmit={handleIdentitySave}
@@ -172,6 +230,39 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
         )}
       </div>
 
+      {nativePermission !== "unsupported" && (
+        <div className="NotificationCenter__desktopBar">
+          {nativePermission === "default" ? (
+            <>
+              <span>Get native desktop alerts when Chrome is minimized</span>
+              <button
+                type="button"
+                className="NotificationCenter__saveBtn"
+                data-testid="enable-desktop-notifications-btn"
+                onClick={() => void requestNativeNotificationPermission()}
+              >
+                Enable alerts
+              </button>
+            </>
+          ) : nativePermission === "granted" ? (
+            <label className="NotificationCenter__desktopToggle">
+              <input
+                type="checkbox"
+                checked={nativeEnabled}
+                onChange={(e) =>
+                  setNativeNotificationPreference(e.target.checked)
+                }
+              />
+              <span>Desktop popups when minimized / away</span>
+            </label>
+          ) : (
+            <span className="NotificationCenter__desktopBlocked">
+              Desktop alerts blocked in browser site settings
+            </span>
+          )}
+        </div>
+      )}
+
       <div className="NotificationCenter__filters" role="tablist">
         {filters.map((item) => (
           <button
@@ -196,20 +287,15 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
               No notifications yet
             </div>
             <div className="NotificationCenter__emptyHint">
-              You&apos;ll see real-time alerts here when someone shares a canvas
-              with you or mentions <code>@{currentUser.handle}</code> on the
-              canvas.
+              You&apos;ll see real-time alerts here for scene shares, team
+              invitations, chat replies, and canvas mentions of{" "}
+              <code>@{currentUser.handle}</code>.
             </div>
           </div>
         ) : (
           filteredNotifications.map((notification) => {
             const badge = getTypeBadge(notification.type);
-            const actionLabel =
-              notification.type === "share_invite"
-                ? "Open canvas"
-                : notification.type === "canvas_mention"
-                ? "Jump to mention"
-                : notification.payload.actionLabel;
+            const actionLabel = getActionLabel(notification);
 
             return (
               <div

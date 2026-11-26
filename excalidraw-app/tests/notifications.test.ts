@@ -14,10 +14,13 @@ import {
   SocketNotificationTransport,
   notificationsAtom,
   notificationToastQueueAtom,
+  showNativeNotification,
+  setNativeNotificationPreference,
   type AppNotification,
   type NotificationStorageAdapter,
   type NotificationTransport,
 } from "../notifications";
+import { mapServerNotification } from "../plus/notificationsSync";
 
 const makeTextElement = (opts: {
   id: string;
@@ -313,6 +316,127 @@ describe("notifications core system", () => {
       await socketTransport.flushOutbox();
       expect(broadcastEncrypted).toHaveBeenCalledTimes(1);
       expect(broadcastEncrypted).toHaveBeenCalledWith(sampleNotification);
+    });
+  });
+
+  describe("native desktop notifications & Plus server mapping", () => {
+    it("pops native OS notification when document is hidden/minimized and opens in-app view on click", () => {
+      const created: Array<{
+        title: string;
+        options: NotificationOptions;
+        onclick: ((ev: Event) => void) | null;
+        close: () => void;
+      }> = [];
+
+      class MockNotification {
+        static permission: NotificationPermission = "granted";
+        title: string;
+        options: NotificationOptions;
+        onclick: ((ev: Event) => void) | null = null;
+        close = vi.fn();
+        constructor(title: string, options: NotificationOptions = {}) {
+          this.title = title;
+          this.options = options;
+          created.push(this);
+        }
+      }
+
+      const originalNotification = (globalThis as any).Notification;
+      (globalThis as any).Notification = MockNotification;
+      setNativeNotificationPreference(true);
+
+      const onActivate = vi.fn();
+      const focusSpy = vi.spyOn(window, "focus").mockImplementation(() => {});
+
+      const note: AppNotification = {
+        id: "srv-n-1",
+        type: "comment_mention",
+        title: "Mentioned in Architecture",
+        message: 'Alice mentioned you in chat: "@Bob check this"',
+        sender: { id: "u-alice", username: "Alice", handle: "alice" },
+        recipientHandle: "bob",
+        createdAt: Date.now(),
+        read: false,
+        dedupeKey: "comment-mention:c1:u-bob",
+        priority: "high",
+        payload: {
+          sceneId: "scene-1",
+          commentId: "c1",
+        },
+      };
+
+      try {
+        // When active/focused, native popup should not fire unless forced
+        const hiddenDocActive = {
+          hidden: false,
+          hasFocus: () => true,
+          defaultView: window,
+        } as unknown as Document;
+        expect(
+          showNativeNotification(note, { doc: hiddenDocActive, onActivate }),
+        ).toBeNull();
+        expect(created).toHaveLength(0);
+
+        // When Chrome is minimized/hidden, native popup fires and click activates callback
+        const hiddenDocMinimized = {
+          hidden: true,
+          hasFocus: () => false,
+          defaultView: window,
+        } as unknown as Document;
+        const nativePopup = showNativeNotification(note, {
+          doc: hiddenDocMinimized,
+          onActivate,
+        });
+        expect(nativePopup).not.toBeNull();
+        expect(created).toHaveLength(1);
+        expect(created[0].title).toContain("Mentioned in Architecture");
+
+        created[0].onclick?.(new Event("click"));
+        expect(focusSpy).toHaveBeenCalled();
+        expect(created[0].close).toHaveBeenCalled();
+        expect(onActivate).toHaveBeenCalledWith(note);
+      } finally {
+        (globalThis as any).Notification = originalNotification;
+        focusSpy.mockRestore();
+      }
+    });
+
+    it("maps server notifications for scene shares, team adds, and comment replies", () => {
+      const user = {
+        id: "u-bob",
+        email: "bob@example.com",
+        name: "Bob",
+        createdAt: 1000,
+        hasAIKey: false,
+      };
+      const mapped = mapServerNotification(
+        {
+          id: "n-team-1",
+          userId: "u-bob",
+          actor: { id: "u-alice", name: "Alice", avatarUrl: null },
+          type: "team_added",
+          title: "Added to team",
+          message: 'Alice added you to team "Core" as member',
+          sceneId: null,
+          sceneName: null,
+          teamId: "team-9",
+          teamName: "Core",
+          commentId: null,
+          elementId: null,
+          dedupeKey: "team:9:bob",
+          payload: { role: "member" },
+          read: false,
+          readAt: null,
+          createdAt: 2000,
+        },
+        user,
+      );
+
+      expect(mapped.type).toBe("team_added");
+      if (mapped.type === "team_added") {
+        expect(mapped.payload.teamId).toBe("team-9");
+        expect(mapped.payload.role).toBe("member");
+      }
     });
   });
 });
