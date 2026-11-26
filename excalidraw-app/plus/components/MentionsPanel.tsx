@@ -11,7 +11,7 @@ import {
 import { openCloudScene } from "../scenes";
 
 import { CommentBody } from "./MentionInput";
-import { ErrorText, initials, timeAgo, useAsyncAction } from "./ui";
+import { ErrorText, PlusAvatar, timeAgo, useAsyncAction } from "./ui";
 
 import type { MentionInboxItem, PlusUser } from "../api";
 
@@ -69,9 +69,11 @@ export const MentionsPanel = ({ user }: { user: PlusUser }) => {
             }}
           >
             <span className="plus-mention-item__meta">
-              <span className="plus-avatar small" aria-hidden="true">
-                {initials(mention.author.name)}
-              </span>
+              <PlusAvatar
+                name={mention.author.name}
+                avatarUrl={mention.author.avatarUrl}
+                size="small"
+              />
               <strong>{mention.author.name}</strong>
               <span className="plus-muted">
                 in {mention.sceneName} · {timeAgo(mention.createdAt)}

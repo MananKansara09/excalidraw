@@ -1,15 +1,19 @@
 import { Dialog } from "@excalidraw/excalidraw/components/Dialog";
 import { FilledButton } from "@excalidraw/excalidraw/components/FilledButton";
+import { Select } from "@excalidraw/excalidraw/components/Select";
 import { useEffect, useRef, useState } from "react";
 
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 
 import { useAtom, useAtomValue, useSetAtom } from "../../app-jotai";
+import { notificationEngine } from "../../notifications";
 import { plusAPI, PlusAPIError } from "../api";
+import { startPlusNotificationsSync } from "../notificationsSync";
 import {
   activeCommentIdAtom,
   cloudSceneAtom,
   cloudStatusAtom,
+  commentsAtom,
   connectionIdAtom,
   participantsAtom,
   mentionsUnreadAtom,
@@ -17,6 +21,7 @@ import {
   plusDialogAtom,
   plusUserAtom,
 } from "../state";
+import { parseCommentHash } from "../cloud";
 import { hangout, hangoutAtom } from "../hangout";
 import { APP_ROUTES } from "../../app_routes";
 import { goToSignIn } from "../auth";
@@ -105,18 +110,16 @@ const SaveToCloudDialog = ({ api }: { api: ExcalidrawImperativeAPI }) => {
           />
         </Field>
         <Field label="Workspace">
-          <select
+          <Select
             className="plus-select"
+            label="Workspace"
             value={teamId}
-            onChange={(event) => setTeamId(event.target.value)}
-          >
-            <option value="">My scenes</option>
-            {teams.map((team) => (
-              <option key={team.id} value={team.id}>
-                {team.name}
-              </option>
-            ))}
-          </select>
+            options={[
+              { value: "", label: "My scenes" },
+              ...teams.map((team) => ({ value: team.id, label: team.name })),
+            ]}
+            onChange={setTeamId}
+          />
         </Field>
         <ErrorText error={error} />
         <FilledButton
@@ -152,6 +155,41 @@ export const PlusRoot = ({ api }: { api: ExcalidrawImperativeAPI }) => {
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, [cloudStatus.state]);
 
+  // real-time server notifications + workspace user directory sync
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+    return startPlusNotificationsSync(user);
+  }, [user]);
+
+  // seed knownUsers from active cloud scene participants/members for canvas @mentions
+  useEffect(() => {
+    if (!scene?.id || !user) {
+      return;
+    }
+    let cancelled = false;
+    plusAPI
+      .listPeople(scene.id)
+      .then(({ people }) => {
+        if (!cancelled) {
+          notificationEngine.registerKnownUsers(
+            people.map((person) => ({
+              id: person.userId,
+              username: person.name,
+              email: person.email,
+              avatarUrl: person.avatarUrl,
+              source: "plus",
+            })),
+          );
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [scene?.id, user]);
+
   // unread @-mentions for the Workspace badge
   const setUnreadMentions = useSetAtom(mentionsUnreadAtom);
   useEffect(() => {
@@ -185,6 +223,19 @@ export const PlusRoot = ({ api }: { api: ExcalidrawImperativeAPI }) => {
       setPendingFocus(null);
     }
   }, [pendingFocus, scene?.id, api, setActiveComment, setPendingFocus]);
+
+  // a link to one comment (`&comment=<id>`): show its thread once loaded
+  const linkedComment = useRef<string | null>(parseCommentHash());
+  const comments = useAtomValue(commentsAtom);
+  useEffect(() => {
+    const id = linkedComment.current;
+    if (id && comments.some((c) => c.id === id)) {
+      linkedComment.current = null;
+      const thread = comments.find((c) => c.id === id)!;
+      const root = comments.find((c) => c.id === thread.parentId) ?? thread;
+      setActiveComment(root.id);
+    }
+  }, [comments, setActiveComment]);
 
   // tell people outside the call when someone starts sharing their screen
   const participants = useAtomValue(participantsAtom);

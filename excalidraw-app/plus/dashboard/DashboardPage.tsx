@@ -7,7 +7,7 @@ import { plusAPI, PlusAPIError } from "../api";
 import { goToSignIn } from "../auth";
 import { MentionsPanel } from "../components/MentionsPanel";
 import { TeamPanel } from "../components/TeamPanel";
-import { initials, timeAgo, useAsyncAction } from "../components/ui";
+import { AvatarContent, timeAgo, useAsyncAction } from "../components/ui";
 import { openCloudScene } from "../scenes";
 
 import { FormModal, ModalProvider, useModal } from "./Modal";
@@ -130,11 +130,18 @@ const Dashboard = ({
   const { pending, error, setError, run } = useAsyncAction();
 
   const [teams, setTeams] = useState<TeamSummary[]>([]);
-  const [teamId, setTeamId] = useState<string | null>(null);
+  // `?team=<id>` (from a "you were added to a team" notification) opens
+  // that team's members
+  const [openTeamId] = useState(() =>
+    new URLSearchParams(window.location.search).get("team"),
+  );
+  const [teamId, setTeamId] = useState<string | null>(openTeamId);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [scenes, setScenes] = useState<SceneSummary[]>([]);
   const [loaded, setLoaded] = useState(false);
-  const [view, setView] = useState<View>({ kind: "scenes" });
+  const [view, setView] = useState<View>({
+    kind: openTeamId ? "members" : "scenes",
+  });
   /** `null` is the workspace's top level (Private / General). */
   const [folderId, setFolderId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -493,7 +500,11 @@ const Dashboard = ({
       <aside className="dash-sidebar">
         <div className="dash-sidebar__user">
           <span className="dash-avatar" aria-hidden="true">
-            {initials(user.name || user.email)}
+            <AvatarContent
+              name={user.name || user.email}
+              avatarUrl={user.avatarUrl}
+              imgClassName="dash-avatar__img"
+            />
           </span>
           <span className="dash-sidebar__user-name">
             {user.name || user.email}

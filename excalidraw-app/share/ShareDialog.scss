@@ -187,5 +187,136 @@
         justify-content: center;
       }
     }
+
+    &__people {
+      display: flex;
+      flex-direction: column;
+      gap: 0.625rem;
+      padding: 0.75rem;
+      border-radius: var(--border-radius-lg);
+      background-color: var(--color-surface-low);
+      border: 1px solid var(--default-border-color);
+
+      &__header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-size: 0.8125rem;
+        font-weight: 700;
+      }
+
+      &__badge {
+        font-size: 0.6875rem;
+        font-weight: 600;
+        padding: 0.1rem 0.45rem;
+        border-radius: 999px;
+        background-color: var(--color-primary-light);
+        color: var(--color-primary);
+      }
+
+      &__form {
+        display: flex;
+        align-items: stretch;
+        gap: 0.5rem;
+      }
+
+      &__role {
+        padding: 0 0.75rem;
+        font-size: 0.75rem;
+        font-weight: 600;
+      }
+
+      &__suggestions {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.35rem;
+      }
+
+      &__suggestionsLabel {
+        font-size: 0.71875rem;
+        opacity: 0.7;
+      }
+
+      &__chip {
+        border: 1px solid var(--default-border-color);
+        background-color: var(--island-bg-color);
+        color: var(--text-primary-color);
+        border-radius: 999px;
+        padding: 0.15rem 0.5rem;
+        font-size: 0.71875rem;
+        font-weight: 600;
+        cursor: pointer;
+
+        &:hover {
+          border-color: var(--color-primary);
+          color: var(--color-primary);
+        }
+      }
+
+      &__status {
+        font-size: 0.75rem;
+        font-weight: 600;
+        color: #099268;
+      }
+
+      &__list {
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+        max-height: 8.5rem;
+        overflow-y: auto;
+      }
+
+      &__row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0.35rem 0.5rem;
+        border-radius: var(--border-radius-md);
+        background-color: var(--island-bg-color);
+        border: 1px solid var(--default-border-color);
+        font-size: 0.75rem;
+      }
+
+      &__user {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        min-width: 0;
+
+        span {
+          opacity: 0.65;
+        }
+      }
+
+      &__rowActions {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+
+      &__roleBadge {
+        font-size: 0.6875rem;
+        text-transform: capitalize;
+        padding: 0.1rem 0.35rem;
+        border-radius: 4px;
+        background-color: var(--color-surface-low);
+      }
+
+      &__removeBtn {
+        border: none;
+        background: transparent;
+        color: var(--color-danger-text, #e03131);
+        font-size: 0.71875rem;
+        font-weight: 600;
+        cursor: pointer;
+        padding: 0;
+
+        &:hover {
+          text-decoration: underline;
+        }
+      }
+    }
   }
 }

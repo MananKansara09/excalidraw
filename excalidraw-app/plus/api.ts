@@ -19,6 +19,7 @@ export type PlusUser = {
   id: string;
   email: string;
   name: string;
+  avatarUrl?: string | null;
   createdAt: number;
   hasAIKey: boolean;
 };
@@ -80,6 +81,7 @@ export type TeamDetail = {
     userId: string;
     name: string;
     email: string;
+    avatarUrl: string | null;
     role: TeamRole;
     joinedAt: number;
   }[];
@@ -87,12 +89,18 @@ export type TeamDetail = {
 };
 
 export type SceneAccess = {
-  owner: { userId: string; name: string; email: string };
+  owner: {
+    userId: string;
+    name: string;
+    email: string;
+    avatarUrl: string | null;
+  };
   teamId: string | null;
   collaborators: {
     userId: string;
     name: string;
     email: string;
+    avatarUrl: string | null;
     role: "editor" | "viewer";
   }[];
   links: {
@@ -107,7 +115,7 @@ export type PlusComment = {
   id: string;
   sceneId: string;
   parentId: string | null;
-  author: { id: string; name: string };
+  author: { id: string; name: string; avatarUrl: string | null };
   elementId: string | null;
   x: number | null;
   y: number | null;
@@ -120,11 +128,44 @@ export type PlusComment = {
 
 export type Mention = { userId: string; name: string };
 
-export type Person = { userId: string; name: string; email: string };
+export type Person = {
+  userId: string;
+  name: string;
+  email: string;
+  avatarUrl: string | null;
+};
 
 export type MentionInboxItem = PlusComment & {
   sceneName: string;
   unread: boolean;
+};
+
+export type ServerNotificationType =
+  | "scene_share"
+  | "scene_assigned"
+  | "team_added"
+  | "canvas_mention"
+  | "comment_mention"
+  | "comment_reply";
+
+export type ServerNotification = {
+  id: string;
+  userId: string;
+  actor: { id: string | null; name: string; avatarUrl: string | null };
+  type: ServerNotificationType;
+  title: string;
+  message: string;
+  sceneId: string | null;
+  sceneName: string | null;
+  teamId: string | null;
+  teamName: string | null;
+  commentId: string | null;
+  elementId: string | null;
+  dedupeKey: string | null;
+  payload: Record<string, unknown>;
+  read: boolean;
+  readAt: number | null;
+  createdAt: number;
 };
 
 export type ApiKey = {
@@ -217,6 +258,7 @@ export const plusAPI = {
   logout: () => plusFetch("/auth/logout", { method: "POST", body: {} }),
   updateMe: (body: {
     name?: string;
+    avatarUrl?: string | null;
     aiKey?: string | null;
     password?: string;
     currentPassword?: string;
@@ -397,6 +439,35 @@ export const plusAPI = {
     plusFetch<{ unread: number; mentions: MentionInboxItem[] }>("/me/mentions"),
   markMentionsSeen: () =>
     plusFetch("/me/mentions/seen", { method: "POST", body: {} }),
+  listNotifications: () =>
+    plusFetch<{ unread: number; notifications: ServerNotification[] }>(
+      "/notifications",
+    ),
+  markNotificationRead: (id: string) =>
+    plusFetch(`/notifications/${id}/read`, { method: "POST", body: {} }),
+  markAllNotificationsRead: () =>
+    plusFetch("/notifications/read-all", { method: "POST", body: {} }),
+  deleteNotification: (id: string) =>
+    plusFetch(`/notifications/${id}`, { method: "DELETE" }),
+  clearNotifications: () => plusFetch("/notifications", { method: "DELETE" }),
+  notificationEventsURL: () => `${PLUS_API_BASE}/notifications/events`,
+  syncCanvasMentions: (
+    sceneId: string,
+    body: {
+      mentions?: Array<{
+        elementId: string;
+        textSnippet: string;
+        recipientNameOrHandle: string;
+        x?: number;
+        y?: number;
+      }>;
+      elements?: readonly any[];
+    },
+  ) =>
+    plusFetch<{ ok: boolean; notified: number }>(
+      `/scenes/${sceneId}/mentions/sync`,
+      { method: "POST", body },
+    ),
   rtcConfig: () => plusFetch<{ iceServers: RTCIceServer[] }>("/rtc-config"),
 
   // realtime
@@ -404,6 +475,18 @@ export const plusAPI = {
     sceneId: string,
     body: { from: string; to?: string; type: string; data?: unknown },
   ) => plusFetch(`/scenes/${sceneId}/signal`, { method: "POST", body }),
+  /** The realtime WebSocket (same events as `eventsURL`, plus live edits). */
+  socketURL: (sceneId: string, name: string | null) => {
+    const url = new URL(
+      `${PLUS_API_BASE}/scenes/${sceneId}/ws${q({
+        share: activeShareToken,
+        name,
+      })}`,
+      window.location.href,
+    );
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    return url.toString();
+  },
   eventsURL: (sceneId: string, name: string | null) =>
     `${PLUS_API_BASE}/scenes/${sceneId}/events${q({
       share: activeShareToken,
