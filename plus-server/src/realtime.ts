@@ -56,7 +56,14 @@ const COLORS = [
 ];
 
 /** Signal types a client may send to one peer (`to`) or broadcast. */
-export const TARGETED_SIGNALS = ["rtc-offer", "rtc-answer", "rtc-ice"] as const;
+export const TARGETED_SIGNALS = [
+  "rtc-offer",
+  "rtc-answer",
+  "rtc-ice",
+  "follow-start",
+  "follow-stop",
+  "viewport",
+] as const;
 export const BROADCAST_SIGNALS = [
   "hangout-join",
   "hangout-leave",

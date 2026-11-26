@@ -194,4 +194,91 @@ describe("cloud participant profile & follow", () => {
       );
     });
   });
+
+  it("syncs followed user viewport bounds and zoom over cloudSession signals", async () => {
+    const updateScene = vi.fn();
+    let scrollState = {
+      scrollX: 0,
+      scrollY: 0,
+      zoom: { value: 1 as any },
+      width: 1000,
+      height: 500,
+      offsetLeft: 0,
+      offsetTop: 0,
+    };
+
+    (cloudSession as any).api = {
+      getAppState: () => scrollState,
+      updateScene,
+    };
+    (cloudSession as any).scene = {
+      id: "scene-1",
+      name: "Architecture",
+      role: "owner",
+      teamId: null,
+      presentation: [],
+      shareToken: null,
+      embed: false,
+    };
+    appJotaiStore.set(connectionIdAtom, "conn-me");
+
+    const signalSpy = vi
+      .spyOn(cloudSession, "signal")
+      .mockResolvedValue(undefined);
+
+    cloudSession.setUserToFollow({
+      socketId: "conn-bob" as SocketId,
+      username: "Bob",
+    });
+    expect(signalSpy).toHaveBeenCalledWith("follow-start", {}, "conn-bob");
+
+    // Simulate receiving zoomed-in viewport bounds from Bob (500x250 scene box)
+    (cloudSession as any).handleEvent("signal", {
+      type: "viewport",
+      from: "conn-bob",
+      data: { sceneBounds: [100, 50, 600, 300] },
+    });
+
+    expect(updateScene).toHaveBeenCalledTimes(1);
+    const firstUpdate = updateScene.mock.calls[0][0].appState;
+    expect(firstUpdate.zoom.value).toBeCloseTo(2);
+    expect(firstUpdate.scrollX).toBeCloseTo(-100);
+    expect(firstUpdate.scrollY).toBeCloseTo(-50);
+
+    // Simulate receiving zoomed-out viewport bounds from Bob (2000x1000 scene box)
+    (cloudSession as any).handleEvent("signal", {
+      type: "viewport",
+      from: "conn-bob",
+      data: { sceneBounds: [-500, -250, 1500, 750] },
+    });
+
+    expect(updateScene).toHaveBeenCalledTimes(2);
+    const secondUpdate = updateScene.mock.calls[1][0].appState;
+    expect(secondUpdate.zoom.value).toBeCloseTo(0.5);
+    expect(secondUpdate.scrollX).toBeCloseTo(500);
+    expect(secondUpdate.scrollY).toBeCloseTo(250);
+
+    // Simulate someone else starting to follow us -> immediately replies with our viewport bounds
+    scrollState = {
+      ...scrollState,
+      scrollX: -40,
+      scrollY: -20,
+      zoom: { value: 1 },
+    };
+    (cloudSession as any).handleEvent("signal", {
+      type: "follow-start",
+      from: "conn-carol",
+      data: {},
+    });
+    expect(signalSpy).toHaveBeenCalledWith(
+      "viewport",
+      { sceneBounds: [40, 20, 1040, 520] },
+      "conn-carol",
+    );
+
+    cloudSession.setUserToFollow(null);
+    (cloudSession as any).followers.clear();
+    (cloudSession as any).api = null;
+    (cloudSession as any).scene = null;
+  });
 });

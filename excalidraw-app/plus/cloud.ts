@@ -551,6 +551,11 @@ class CloudSession {
         if (this.canEdit()) {
           this.flush();
         }
+        if (this.followTarget) {
+          this.signal("follow-start", {}, this.followTarget.socketId).catch(
+            () => {},
+          );
+        }
         break;
       }
       case "presence": {

@@ -643,6 +643,48 @@ describe("realtime over WebSocket", () => {
     alice.send({ type: "ping", t: 7 });
     assert.deepEqual(await alice.next("pong"), { t: 7 });
 
+    // follow-start, viewport, and follow-stop targeted signals relay between peers
+    const bobPeer = await connect(url(viewerToken, "BobFollow"));
+    const bobPeerId = (await bobPeer.next("hello")).connectionId;
+
+    alice.send({
+      type: "signal",
+      signal: "follow-start",
+      to: bobPeerId,
+      data: {},
+    });
+    assert.deepEqual(await bobPeer.next("signal"), {
+      type: "follow-start",
+      from: aliceId,
+      data: {},
+    });
+
+    const bounds = [-200, -100, 600, 400];
+    bobPeer.send({
+      type: "signal",
+      signal: "viewport",
+      to: aliceId,
+      data: { sceneBounds: bounds },
+    });
+    assert.deepEqual(await alice.next("signal"), {
+      type: "viewport",
+      from: bobPeerId,
+      data: { sceneBounds: bounds },
+    });
+
+    alice.send({
+      type: "signal",
+      signal: "follow-stop",
+      to: bobPeerId,
+      data: {},
+    });
+    assert.deepEqual(await bobPeer.next("signal"), {
+      type: "follow-stop",
+      from: aliceId,
+      data: {},
+    });
+
+    bobPeer.close();
     alice.close();
     bob.close();
   });
