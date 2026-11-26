@@ -1,5 +1,6 @@
 import { Dialog } from "@excalidraw/excalidraw/components/Dialog";
 import { FilledButton } from "@excalidraw/excalidraw/components/FilledButton";
+import { Select } from "@excalidraw/excalidraw/components/Select";
 import { getNonDeletedElements } from "@excalidraw/excalidraw";
 import clsx from "clsx";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -7,6 +8,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 
 import { useAtom, useAtomValue, useSetAtom } from "../../app-jotai";
+import { pendingTeamOpenAtom } from "../../notifications";
 import { plusAPI } from "../api";
 import { cloudSceneHash } from "../cloud";
 import {
@@ -76,12 +78,22 @@ export const WorkspaceDialog = ({
   const [user] = useAtom(plusUserAtom);
   const cloudScene = useAtomValue(cloudSceneAtom);
   const unreadMentions = useAtomValue(mentionsUnreadAtom);
+  const [pendingTeamId, setPendingTeamId] = useAtom(pendingTeamOpenAtom);
 
   const [view, setView] = useState<View>(
-    cloudScene?.teamId
+    pendingTeamId
+      ? { kind: "team", teamId: pendingTeamId, tab: "members" }
+      : cloudScene?.teamId
       ? { kind: "team", teamId: cloudScene.teamId, tab: "scenes" }
       : { kind: "personal" },
   );
+
+  useEffect(() => {
+    if (pendingTeamId) {
+      setView({ kind: "team", teamId: pendingTeamId, tab: "members" });
+      setPendingTeamId(null);
+    }
+  }, [pendingTeamId, setPendingTeamId]);
   const [folderId, setFolderId] = useState<string | null>(null);
   const [teams, setTeams] = useState<TeamSummary[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
@@ -570,38 +582,32 @@ const MoveSceneForm = ({
   return (
     <div className="plus-move" role="group" aria-label={`Move ${scene.name}`}>
       <strong>Move “{scene.name}”</strong>
-      <select
+      <Select
         className="plus-select"
-        aria-label="Workspace"
+        label="Workspace"
         value={teamId}
-        onChange={(event) => {
-          setTeamId(event.target.value);
+        options={[
+          { value: "", label: "My scenes" },
+          ...teams.map((team) => ({ value: team.id, label: team.name })),
+        ]}
+        onChange={(nextTeamId) => {
+          setTeamId(nextTeamId);
           setFolderId("");
         }}
-      >
-        <option value="">My scenes</option>
-        {teams.map((team) => (
-          <option key={team.id} value={team.id}>
-            {team.name}
-          </option>
-        ))}
-      </select>
-      <select
+      />
+      <Select
         className="plus-select"
-        aria-label="Folder"
+        label="Folder"
         value={folderId}
-        onChange={(event) => setFolderId(event.target.value)}
-      >
-        <option value="">(no folder)</option>
-        {folders
-          .map((folder) => ({ folder, label: folderLabel(folder) }))
-          .sort((a, b) => a.label.localeCompare(b.label))
-          .map(({ folder, label }) => (
-            <option key={folder.id} value={folder.id}>
-              {label}
-            </option>
-          ))}
-      </select>
+        options={[
+          { value: "", label: "(no folder)" },
+          ...folders
+            .map((folder) => ({ folder, label: folderLabel(folder) }))
+            .sort((a, b) => a.label.localeCompare(b.label))
+            .map(({ folder, label }) => ({ value: folder.id, label })),
+        ]}
+        onChange={setFolderId}
+      />
       <SmallButton
         disabled={pending}
         onClick={async () => {

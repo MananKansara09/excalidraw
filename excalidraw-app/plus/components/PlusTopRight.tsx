@@ -1,12 +1,17 @@
 import { getClientColor } from "@excalidraw/excalidraw/clients";
+import { CollaboratorProfilePopover } from "@excalidraw/excalidraw/components/CollaboratorProfilePopover";
+import { eyeIcon } from "@excalidraw/excalidraw/components/icons";
 import clsx from "clsx";
 
-import type { SocketId } from "@excalidraw/excalidraw/types";
+import type { Collaborator, SocketId } from "@excalidraw/excalidraw/types";
 
 import { useAtomValue, useSetAtom } from "../../app-jotai";
+import { cloudSession } from "../cloud";
 import {
+  cloudCollaboratorsAtom,
   cloudSceneAtom,
   cloudStatusAtom,
+  cloudUserToFollowAtom,
   mentionsUnreadAtom,
   participantsAtom,
   plusDialogAtom,
@@ -16,7 +21,7 @@ import {
 import { goToSignIn } from "../auth";
 
 import { HangoutButtons } from "./HangoutControls";
-import { initials } from "./ui";
+import { AvatarContent } from "./ui";
 
 const StatusPill = () => {
   const status = useAtomValue(cloudStatusAtom);
@@ -53,6 +58,8 @@ const StatusPill = () => {
 const Participants = () => {
   const participants = useAtomValue(participantsAtom);
   const user = useAtomValue(plusUserAtom);
+  const collaborators = useAtomValue(cloudCollaboratorsAtom);
+  const userToFollow = useAtomValue(cloudUserToFollowAtom);
   // one avatar per person, even with several tabs open
   const people = new Map<string, typeof participants[number]>();
   for (const participant of participants) {
@@ -73,26 +80,66 @@ const Participants = () => {
       className="plus-participants"
       aria-label={`${others.length} others here`}
     >
-      {others.slice(0, 4).map((participant) => (
-        <span
-          key={participant.connectionId}
-          className={clsx("plus-avatar small", {
-            speaking: participant.inHangout,
-          })}
-          // the same colour the editor gives this person's cursor
-          style={{
-            background: getClientColor(participant.connectionId as SocketId, {
-              id: participant.userId ?? participant.connectionId,
-            }),
-            color: "#1e1e1e",
-          }}
-          title={`${participant.name}${
-            participant.inHangout ? " (in voice)" : ""
-          }${participant.sharingScreen ? " (sharing screen)" : ""}`}
-        >
-          {initials(participant.name)}
-        </span>
-      ))}
+      {others.slice(0, 4).map((participant) => {
+        const socketId = participant.connectionId as SocketId;
+        const tracked = collaborators.get(socketId);
+        const collaborator: Collaborator = {
+          ...tracked,
+          id: participant.userId ?? participant.connectionId,
+          socketId,
+          username: participant.name,
+          avatarUrl: participant.avatarUrl ?? undefined,
+          isInCall: participant.inHangout,
+        };
+        const isBeingFollowed =
+          userToFollow?.socketId === participant.connectionId;
+
+        return (
+          <CollaboratorProfilePopover
+            key={participant.connectionId}
+            collaborator={collaborator}
+            socketId={socketId}
+            isBeingFollowed={isBeingFollowed}
+            onToggleFollow={() =>
+              cloudSession.setUserToFollow(
+                isBeingFollowed
+                  ? null
+                  : { socketId, username: participant.name },
+              )
+            }
+          >
+            <button
+              type="button"
+              className={clsx("plus-avatar small plus-avatar-button", {
+                speaking: participant.inHangout,
+                "is-followed": isBeingFollowed,
+                "has-image": !!participant.avatarUrl,
+              })}
+              // the same colour the editor gives this person's cursor
+              style={{
+                background: getClientColor(socketId, {
+                  id: participant.userId ?? participant.connectionId,
+                }),
+                color: "#1e1e1e",
+              }}
+              title={`${participant.name}${
+                participant.inHangout ? " (in voice)" : ""
+              }${participant.sharingScreen ? " (sharing screen)" : ""}`}
+              aria-label={`${participant.name} profile`}
+            >
+              <AvatarContent
+                name={participant.name}
+                avatarUrl={participant.avatarUrl}
+              />
+              {isBeingFollowed && (
+                <span className="plus-avatar__follow-badge" aria-hidden="true">
+                  {eyeIcon}
+                </span>
+              )}
+            </button>
+          </CollaboratorProfilePopover>
+        );
+      })}
       {others.length > 4 && (
         <span className="plus-avatar small more">+{others.length - 4}</span>
       )}
@@ -144,12 +191,14 @@ export const PlusTopRight = () => {
             )}
           </button>
           <button
-            className="plus-avatar plus-avatar-button"
+            className={clsx("plus-avatar plus-avatar-button", {
+              "has-image": !!user.avatarUrl,
+            })}
             onClick={() => setDialog({ name: "account" })}
             title={`${user.name} — account settings`}
             aria-label="Account settings"
           >
-            {initials(user.name)}
+            <AvatarContent name={user.name} avatarUrl={user.avatarUrl} />
           </button>
         </>
       ) : (

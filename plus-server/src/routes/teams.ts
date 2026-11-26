@@ -10,6 +10,8 @@ import {
   requireString,
 } from "../http.ts";
 
+import { createAndPushNotification } from "./notifications.ts";
+
 import type { AppContext } from "../context.ts";
 import type { Router } from "../http.ts";
 import type { TeamRole } from "../access.ts";
@@ -27,7 +29,7 @@ const teamDetail = (ctx: AppContext, teamId: string, viewerRole: TeamRole) => {
     role: viewerRole,
     members: all<any>(
       ctx.db,
-      `SELECT users.id, users.name, users.email, team_members.role, team_members.created_at
+      `SELECT users.id, users.name, users.email, users.avatar_url, team_members.role, team_members.created_at
        FROM team_members JOIN users ON users.id = team_members.user_id
        WHERE team_members.team_id = ? ORDER BY team_members.created_at`,
       teamId,
@@ -35,6 +37,7 @@ const teamDetail = (ctx: AppContext, teamId: string, viewerRole: TeamRole) => {
       userId: member.id,
       name: member.name,
       email: member.email,
+      avatarUrl: member.avatar_url ?? null,
       role: member.role,
       joinedAt: member.created_at,
     })),
@@ -173,6 +176,26 @@ export const registerTeamRoutes = (router: Router, ctx: AppContext) => {
         role,
         now(),
       );
+      const teamRow = get<{ name: string }>(
+        db,
+        "SELECT name FROM teams WHERE id = ?",
+        teamId,
+      );
+      if (teamRow) {
+        createAndPushNotification(ctx, {
+          userId: invitee.id,
+          actorId: user.id,
+          actorName: user.name,
+          actorAvatarUrl: user.avatar_url ?? null,
+          type: "team_added",
+          title: "Added to team",
+          message: `${user.name} added you to team "${teamRow.name}" as ${role}`,
+          teamId,
+          teamName: teamRow.name,
+          dedupeKey: `team-added:${teamId}:${invitee.id}:${now()}`,
+          payload: { role },
+        });
+      }
     } else {
       // joins automatically when they sign up with this email
       run(
