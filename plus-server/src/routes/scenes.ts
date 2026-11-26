@@ -11,8 +11,10 @@ import { all, get, newId, now, run } from "../db.ts";
 import {
   badRequest,
   forbidden,
+  HttpError,
   notFound,
   optionalString,
+  parseCookies,
   requireOneOf,
   requireString,
 } from "../http.ts";
@@ -26,13 +28,18 @@ import {
   updateSceneContent,
 } from "../scenes.ts";
 
+import { acceptWebSocket } from "../websocket.ts";
+
+import type { IncomingMessage } from "node:http";
+import type { Duplex } from "node:stream";
 import type { AppContext } from "../context.ts";
 import type { Request, Router } from "../http.ts";
+import type { Connection } from "../realtime.ts";
 
 import type { FolderRow, SceneRow } from "../access.ts";
 import type { User } from "../auth.ts";
 
-const sceneChannel = (sceneId: string) => `scene:${sceneId}`;
+export const sceneChannel = (sceneId: string) => `scene:${sceneId}`;
 
 /** Checks the caller may put a scene or folder in this team/folder. */
 const resolveLocation = (
@@ -195,26 +202,12 @@ export const registerSceneRoutes = (router: Router, ctx: AppContext) => {
       "editor",
     );
     const body = await req.body();
-    const result = updateSceneContent(db, scene.id, {
-      elements: body.elements,
-      appState: body.appState,
-      files: body.files,
-      replace: replace || req.query.get("replace") === "1",
-    });
-    if (result.changed) {
-      hub.broadcast(
-        sceneChannel(scene.id),
-        "scene-update",
-        {
-          version: result.version,
-          elements: result.accepted,
-          appState: body.appState !== undefined ? result.appState : undefined,
-          fileIds: result.files.map((file) => file.id),
-        },
-        typeof body.connectionId === "string" ? body.connectionId : null,
-      );
-    }
-    return { version: result.version, accepted: result.accepted.length };
+    return applySceneSync(
+      ctx,
+      scene.id,
+      body,
+      replace || req.query.get("replace") === "1",
+    );
   };
 
   router.put("/api/v1/scenes/:sceneId", (req) => saveContent(req, true));
@@ -856,7 +849,10 @@ export const registerSceneRoutes = (router: Router, ctx: AppContext) => {
       user?.name ||
       (req.query.get("name") || "").trim().slice(0, 50) ||
       "Guest";
-    hub.connect(sceneChannel(scene.id), res, { id: user?.id ?? null, name });
+    hub.connectSSE(sceneChannel(scene.id), res, {
+      id: user?.id ?? null,
+      name,
+    });
   });
 
   /**
@@ -873,37 +869,222 @@ export const registerSceneRoutes = (router: Router, ctx: AppContext) => {
       "viewer",
     );
     const body = await req.body();
-    const channel = sceneChannel(scene.id);
-    const from = hub.get(channel, requireString(body.from, "from"));
-    if (!from || (from.userId && from.userId !== user?.id)) {
-      throw forbidden("Unknown connection");
-    }
-    const type = requireOneOf(body.type, "type", [
-      ...TARGETED_SIGNALS,
-      ...BROADCAST_SIGNALS,
-    ]);
-    const message = { type, from: from.id, data: body.data ?? null };
-
-    if ((TARGETED_SIGNALS as readonly string[]).includes(type)) {
-      const to = hub.get(channel, requireString(body.to, "to"));
-      if (!to) {
-        throw notFound("That participant left");
-      }
-      hub.send(to, "signal", message);
-      return { ok: true };
-    }
-
-    if (type === "hangout-join" || type === "hangout-leave") {
-      from.inHangout = type === "hangout-join";
-      if (!from.inHangout) {
-        from.sharingScreen = false;
-      }
-      hub.broadcastPresence(channel);
-    } else if (type === "screen-share-start" || type === "screen-share-stop") {
-      from.sharingScreen = type === "screen-share-start";
-      hub.broadcastPresence(channel);
-    }
-    hub.broadcast(channel, "signal", message, from.id);
-    return { ok: true };
+    return relaySignal(ctx, scene.id, user?.id ?? null, body);
   });
+};
+
+/**
+ * Merges changed elements into the scene, saves them and tells everyone else
+ * on the scene. Shared by the HTTP sync endpoint and the WebSocket channel.
+ */
+export const applySceneSync = (
+  ctx: AppContext,
+  sceneId: string,
+  body: any,
+  replace = false,
+) => {
+  const result = updateSceneContent(ctx.db, sceneId, {
+    elements: body.elements,
+    appState: body.appState,
+    files: body.files,
+    replace,
+  });
+  if (result.changed) {
+    ctx.hub.broadcast(
+      sceneChannel(sceneId),
+      "scene-update",
+      {
+        version: result.version,
+        elements: result.accepted,
+        appState: body.appState !== undefined ? result.appState : undefined,
+        fileIds: result.files.map((file) => file.id),
+      },
+      typeof body.connectionId === "string" ? body.connectionId : null,
+    );
+  }
+  return { version: result.version, accepted: result.accepted.length };
+};
+
+/**
+ * Relays hangout / screen-share / pointer signaling between peers on a scene.
+ * Offers, answers and ICE candidates go to one peer; the rest is broadcast.
+ */
+export const relaySignal = (
+  ctx: AppContext,
+  sceneId: string,
+  userId: string | null,
+  body: any,
+) => {
+  const { hub } = ctx;
+  const channel = sceneChannel(sceneId);
+  const from = hub.get(channel, requireString(body.from, "from"));
+  if (!from || (from.userId && from.userId !== userId)) {
+    throw forbidden("Unknown connection");
+  }
+  const type = requireOneOf(body.type, "type", [
+    ...TARGETED_SIGNALS,
+    ...BROADCAST_SIGNALS,
+  ]);
+  const message = { type, from: from.id, data: body.data ?? null };
+
+  if ((TARGETED_SIGNALS as readonly string[]).includes(type)) {
+    const to = hub.get(channel, requireString(body.to, "to"));
+    if (!to) {
+      throw notFound("That participant left");
+    }
+    hub.send(to, "signal", message);
+    return { ok: true };
+  }
+
+  if (type === "hangout-join" || type === "hangout-leave") {
+    from.inHangout = type === "hangout-join";
+    if (!from.inHangout) {
+      from.sharingScreen = false;
+    }
+    hub.broadcastPresence(channel);
+  } else if (type === "screen-share-start" || type === "screen-share-stop") {
+    from.sharingScreen = type === "screen-share-start";
+    hub.broadcastPresence(channel);
+  }
+  hub.broadcast(channel, "signal", message, from.id);
+  return { ok: true };
+};
+
+const SOCKET_PATH = /^\/api\/v1\/scenes\/([^/]+)\/ws\/?$/;
+
+const rejectUpgrade = (socket: Duplex, status: number, message: string) => {
+  const body = JSON.stringify({ statusCode: status, message });
+  socket.end(
+    `HTTP/1.1 ${status} ${message.replace(/[^\w .,'-]/g, "")}\r\n` +
+      `Content-Type: application/json\r\nContent-Length: ${Buffer.byteLength(
+        body,
+      )}\r\nConnection: close\r\n\r\n${body}`,
+  );
+};
+
+/**
+ * `GET /api/v1/scenes/:id/ws` (WebSocket upgrade): the low-latency twin of the
+ * SSE `events` stream. Server → client frames are `{ event, data }` exactly
+ * like the SSE events. Client → server frames:
+ *
+ *   { type: "sync", id, elements?, appState?, files? }  → { event: "sync-ack" | "sync-error", data: { id, ... } }
+ *   { type: "signal", signal, to?, data? }               (pointers, hangouts, WebRTC)
+ *   { type: "ping" }                                      → { event: "pong" }
+ *
+ * Returns false when the path isn't a scene socket.
+ */
+export const handleSceneSocket = (
+  ctx: AppContext,
+  raw: IncomingMessage,
+  socket: Duplex,
+  head: Buffer,
+) => {
+  const url = new URL(raw.url || "/", "http://localhost");
+  const match = SOCKET_PATH.exec(url.pathname);
+  if (!match) {
+    return false;
+  }
+  const { db, hub } = ctx;
+  const sceneId = decodeURIComponent(match[1]);
+  const req: Request = {
+    raw,
+    method: "GET",
+    path: url.pathname,
+    query: url.searchParams,
+    params: { sceneId },
+    headers: raw.headers,
+    cookies: parseCookies(raw.headers.cookie),
+    ip: raw.socket.remoteAddress || "unknown",
+    body: async () => ({}),
+  };
+
+  let user;
+  try {
+    user = getUser(db, req);
+    loadSceneForRole(db, req, user, sceneId, "viewer");
+  } catch (error) {
+    if (error instanceof HttpError) {
+      rejectUpgrade(socket, error.status, error.message);
+    } else {
+      console.error(error);
+      rejectUpgrade(socket, 500, "Internal server error");
+    }
+    return true;
+  }
+
+  const ws = acceptWebSocket(raw, socket, head);
+  if (!ws) {
+    return true;
+  }
+  const name =
+    user?.name ||
+    (url.searchParams.get("name") || "").trim().slice(0, 50) ||
+    "Guest";
+  const connection: Connection = hub.connectWebSocket(
+    sceneChannel(sceneId),
+    ws,
+    { id: user?.id ?? null, name },
+  );
+
+  const reply = (event: string, data: unknown) =>
+    hub.send(connection, event, data);
+
+  ws.onMessage((text) => {
+    let message: any;
+    try {
+      message = JSON.parse(text);
+    } catch {
+      return;
+    }
+    if (!message || typeof message !== "object") {
+      return;
+    }
+    // access is re-checked per message: roles and sessions can change while
+    // a socket stays open
+    const current = getUserSafe(ctx, req);
+    try {
+      if (message.type === "sync") {
+        loadSceneForRole(db, req, current, sceneId, "editor");
+        const result = applySceneSync(ctx, sceneId, {
+          elements: message.elements,
+          appState: message.appState,
+          files: message.files,
+          connectionId: connection.id,
+        });
+        reply("sync-ack", { id: message.id, ...result });
+      } else if (message.type === "signal") {
+        loadSceneForRole(db, req, current, sceneId, "viewer");
+        relaySignal(ctx, sceneId, current?.id ?? null, {
+          from: connection.id,
+          to: message.to,
+          type: message.signal,
+          data: message.data,
+        });
+      } else if (message.type === "ping") {
+        reply("pong", { t: message.t ?? null });
+      }
+    } catch (error: any) {
+      if (message.type === "sync") {
+        reply("sync-error", {
+          id: message.id,
+          status: error instanceof HttpError ? error.status : 500,
+          message:
+            error instanceof HttpError
+              ? error.message
+              : "Couldn't save changes",
+        });
+      } else if (!(error instanceof HttpError)) {
+        console.error(error);
+      }
+    }
+  });
+  return true;
+};
+
+const getUserSafe = (ctx: AppContext, req: Request) => {
+  try {
+    return getUser(ctx.db, req);
+  } catch {
+    return null;
+  }
 };
