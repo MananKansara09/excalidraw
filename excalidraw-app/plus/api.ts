@@ -404,6 +404,18 @@ export const plusAPI = {
     sceneId: string,
     body: { from: string; to?: string; type: string; data?: unknown },
   ) => plusFetch(`/scenes/${sceneId}/signal`, { method: "POST", body }),
+  /** The realtime WebSocket (same events as `eventsURL`, plus live edits). */
+  socketURL: (sceneId: string, name: string | null) => {
+    const url = new URL(
+      `${PLUS_API_BASE}/scenes/${sceneId}/ws${q({
+        share: activeShareToken,
+        name,
+      })}`,
+      window.location.href,
+    );
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    return url.toString();
+  },
   eventsURL: (sceneId: string, name: string | null) =>
     `${PLUS_API_BASE}/scenes/${sceneId}/events${q({
       share: activeShareToken,

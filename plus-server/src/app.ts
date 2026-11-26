@@ -8,7 +8,7 @@ import { Router, sendJSON } from "./http.ts";
 import { registerMCPRoutes } from "./mcp.ts";
 import { RealtimeHub } from "./realtime.ts";
 import { registerAuthRoutes } from "./routes/auth.ts";
-import { registerSceneRoutes } from "./routes/scenes.ts";
+import { handleSceneSocket, registerSceneRoutes } from "./routes/scenes.ts";
 import { registerTeamRoutes } from "./routes/teams.ts";
 
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -52,7 +52,8 @@ const API_INDEX = {
     "GET|POST /api/v1/scenes/:id/access, DELETE /api/v1/scenes/:id/access/:userId",
     "POST /api/v1/scenes/:id/links, DELETE /api/v1/scenes/:id/links/:token",
     "GET|POST /api/v1/scenes/:id/comments, PATCH|DELETE /api/v1/comments/:id",
-    "GET /api/v1/scenes/:id/events (Server-Sent Events)",
+    "GET /api/v1/scenes/:id/ws (WebSocket: live edits, presence, pointers, signaling)",
+    "GET /api/v1/scenes/:id/events (Server-Sent Events, fallback)",
     "GET /api/v1/ai/usage",
     "POST /api/v1/ai/text-to-diagram/chat-streaming",
     "POST /api/v1/ai/diagram-to-code/generate-streaming",
@@ -169,6 +170,18 @@ export const createApp = (options: CreateAppOptions) => {
       } else {
         res.end();
       }
+    }
+  });
+
+  // realtime scene channel (WebSocket); SSE + HTTP remain as the fallback
+  server.on("upgrade", (req, socket, head) => {
+    try {
+      if (!handleSceneSocket(ctx, req, socket, head)) {
+        socket.destroy();
+      }
+    } catch (error) {
+      console.error(error);
+      socket.destroy();
     }
   });
 

@@ -88,6 +88,6 @@ The tests start the server on a random port with an in-memory database and a fak
 
 ## Notes and limits
 
-- Live collaboration on cloud scenes goes through this server (Server-Sent Events), unlike the app's end-to-end encrypted live rooms, which use the separate excalidraw-room service. Cloud scenes are stored unencrypted on your server.
+- Live collaboration on cloud scenes goes through this server over a WebSocket (`/api/v1/scenes/:id/ws`; edits are acknowledged, and the app falls back to Server-Sent Events + HTTP if WebSockets are blocked). If you put a reverse proxy in front, it must forward `Upgrade` requests, unlike the app's end-to-end encrypted live rooms, which use the separate excalidraw-room service. Cloud scenes are stored unencrypted on your server.
 - Hangouts are a peer-to-peer mesh: fine for small groups; larger calls need an SFU.
 - The server keeps realtime state in memory, so run a single instance.
