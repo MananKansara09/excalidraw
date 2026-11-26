@@ -78,6 +78,18 @@ const POINTER_INTERVAL_MS = 40;
  * of a gesture), so collaborators see a drag or a stroke as it happens.
  */
 const SYNC_INTERVAL_MS = 50;
+/** Backoff between WebSocket reconnect attempts. */
+const RECONNECT_BASE_MS = 500;
+const RECONNECT_MAX_MS = 8000;
+/** Ping the server this often; no reply for this long means the link is dead. */
+const KEEPALIVE_MS = 20_000;
+const DEAD_AFTER_MS = 50_000;
+/** Give up on an unacknowledged edit (it is then re-sent over HTTP). */
+const ACK_TIMEOUT_MS = 15_000;
+/** Initial connection failures before falling back to SSE + HTTP. */
+const SOCKET_FALLBACK_AFTER = 2;
+/** Skip best-effort pointer frames while this much is still unsent. */
+const POINTER_BACKPRESSURE_BYTES = 64 * 1024;
 /** How quickly a remote cursor glides towards its latest position (per frame). */
 const CURSOR_EASING = 0.35;
 type SignalListener = (message: SignalMessage) => void;
@@ -101,7 +113,24 @@ const toBinaryFiles = (files: Record<string, PlusFile> | undefined) =>
 class CloudSession {
   private api: ExcalidrawImperativeAPI | null = null;
   private scene: CloudScene | null = null;
+  /** SSE stream: only used when WebSockets can't connect. */
   private events: EventSource | null = null;
+  private socket: WebSocket | null = null;
+  private socketReady = false;
+  private socketAttempts = 0;
+  private everOpened = false;
+  private reconnectTimer = 0;
+  private keepAliveTimer = 0;
+  private lastServerMessage = 0;
+  private syncSeq = 0;
+  private pendingAcks = new Map<
+    string,
+    {
+      resolve: (value: { version: number; accepted: number }) => void;
+      reject: (error: Error) => void;
+      timer: number;
+    }
+  >();
   private syncedVersions = new Map<string, number>();
   private uploadedFiles = new Set<string>();
   private syncedBackground: string | null = null;
@@ -207,8 +236,7 @@ class CloudSession {
     if (this.scene && this.canEdit()) {
       this.flush.flush();
     }
-    this.events?.close();
-    this.events = null;
+    this.closeTransport();
     this.scene = null;
     this.api = null;
     this.connectedOnce = false;
@@ -273,11 +301,10 @@ class CloudSession {
 
   // throttled rather than debounced: a debounce never fires while the user
   // keeps dragging or drawing, so others would only see the result afterwards
-  private flush = throttle(
-    () => this.runFlush(),
-    SYNC_INTERVAL_MS,
-    { leading: true, trailing: true },
-  );
+  private flush = throttle(() => this.runFlush(), SYNC_INTERVAL_MS, {
+    leading: true,
+    trailing: true,
+  });
 
   private runFlush() {
     if (this.inFlight) {
@@ -332,7 +359,7 @@ class CloudSession {
         Object.keys(files).length ||
         background !== this.syncedBackground
       ) {
-        await plusAPI.syncScene(scene.id, {
+        await this.syncRemote(scene.id, {
           elements: changed,
           files,
           appState:
@@ -453,105 +480,321 @@ class CloudSession {
     }
   }
 
+  /** Server → client events, whichever transport delivered them. */
+  private handleEvent(type: string, data: any) {
+    switch (type) {
+      case "hello": {
+        appJotaiStore.set(connectionIdAtom, data.connectionId);
+        if (this.connectedOnce) {
+          this.resync();
+        }
+        this.connectedOnce = true;
+        if (appJotaiStore.get(cloudStatusAtom).state === "offline") {
+          appJotaiStore.set(cloudStatusAtom, {
+            state: "saved",
+            at: Date.now(),
+          });
+        }
+        // edits made while disconnected go out now
+        if (this.canEdit()) {
+          this.flush();
+        }
+        break;
+      }
+      case "presence": {
+        const { participants } = data as { participants: Participant[] };
+        appJotaiStore.set(participantsAtom, participants);
+        this.syncCollaboratorsWithPresence(participants);
+        // newcomers learn where everyone's pointer and selection are
+        this.sendPointer();
+        break;
+      }
+      case "scene-update": {
+        this.applyRemoteElements(data.elements);
+        if (data.appState?.viewBackgroundColor) {
+          this.syncedBackground = data.appState.viewBackgroundColor;
+          this.api?.updateScene({
+            appState: {
+              viewBackgroundColor: data.appState.viewBackgroundColor,
+            },
+            captureUpdate: CaptureUpdateAction.NEVER,
+          });
+        }
+        if (data.fileIds?.length) {
+          this.fetchMissingFiles(data.fileIds);
+        }
+        break;
+      }
+      case "scene-meta": {
+        if (!this.scene) {
+          return;
+        }
+        const meta = data as { name: string; presentation: string[] };
+        this.scene = {
+          ...this.scene,
+          name: meta.name,
+          presentation: meta.presentation,
+        };
+        this.syncedName = meta.name;
+        appJotaiStore.set(cloudSceneAtom, this.scene);
+        if (this.api && this.api.getAppState().name !== meta.name) {
+          this.api.updateScene({
+            appState: { name: meta.name },
+            captureUpdate: CaptureUpdateAction.NEVER,
+          });
+        }
+        break;
+      }
+      case "comment": {
+        const comments = appJotaiStore.get(commentsAtom);
+        if (data.action === "delete") {
+          appJotaiStore.set(
+            commentsAtom,
+            comments.filter(
+              (c) => c.id !== data.commentId && c.parentId !== data.commentId,
+            ),
+          );
+        } else {
+          this.upsertComment(data.comment as PlusComment);
+        }
+        break;
+      }
+      case "signal": {
+        const message = data as SignalMessage;
+        if (message.type === "pointer") {
+          this.onRemotePointer(message.from, message.data);
+          return;
+        }
+        this.signalListeners.forEach((listener) => listener(message));
+        break;
+      }
+      case "scene-deleted": {
+        appJotaiStore.set(cloudStatusAtom, {
+          state: "error",
+          message: "This scene was deleted",
+        });
+        this.closeTransport();
+        break;
+      }
+      case "sync-ack": {
+        const pending = this.pendingAcks.get(data.id);
+        if (pending) {
+          clearTimeout(pending.timer);
+          this.pendingAcks.delete(data.id);
+          pending.resolve({ version: data.version, accepted: data.accepted });
+        }
+        break;
+      }
+      case "sync-error": {
+        const pending = this.pendingAcks.get(data.id);
+        if (pending) {
+          clearTimeout(pending.timer);
+          this.pendingAcks.delete(data.id);
+          pending.reject(new PlusAPIError(data.status ?? 500, data.message));
+        }
+        break;
+      }
+      default:
+        break;
+    }
+  }
+
+  private closeTransport() {
+    this.events?.close();
+    this.events = null;
+    const socket = this.socket;
+    this.socket = null;
+    this.socketReady = false;
+    this.socketAttempts = 0;
+    this.everOpened = false;
+    clearTimeout(this.reconnectTimer);
+    clearInterval(this.keepAliveTimer);
+    this.reconnectTimer = this.keepAliveTimer = 0;
+    this.failPendingAcks();
+    if (socket) {
+      socket.onopen = socket.onmessage = socket.onclose = socket.onerror = null;
+      socket.close();
+    }
+  }
+
+  private failPendingAcks() {
+    for (const pending of this.pendingAcks.values()) {
+      clearTimeout(pending.timer);
+      pending.reject(new PlusAPIError(0, "Connection lost"));
+    }
+    this.pendingAcks.clear();
+  }
+
   private openEvents() {
-    const scene = this.scene!;
+    if (typeof WebSocket === "undefined") {
+      this.openEventSource();
+      return;
+    }
+    this.openSocket();
+  }
+
+  /** The realtime WebSocket: reconnects with backoff until the scene closes. */
+  private openSocket() {
+    const scene = this.scene;
+    if (!scene) {
+      return;
+    }
+    const user = appJotaiStore.get(plusUserAtom);
+    let socket: WebSocket;
+    try {
+      socket = new WebSocket(
+        plusAPI.socketURL(scene.id, user ? null : "Guest"),
+      );
+    } catch {
+      this.openEventSource();
+      return;
+    }
+    this.socket = socket;
+    this.socketReady = false;
+    const current = () => this.socket === socket && this.scene === scene;
+
+    socket.onopen = () => {
+      if (!current()) {
+        return;
+      }
+      this.everOpened = true;
+      this.socketAttempts = 0;
+      this.lastServerMessage = Date.now();
+      clearInterval(this.keepAliveTimer);
+      this.keepAliveTimer = window.setInterval(() => {
+        if (!current()) {
+          return;
+        }
+        if (Date.now() - this.lastServerMessage > DEAD_AFTER_MS) {
+          // silent drop: close so we reconnect and resync
+          socket.close();
+          return;
+        }
+        socket.send(JSON.stringify({ type: "ping", t: Date.now() }));
+      }, KEEPALIVE_MS);
+    };
+    socket.onmessage = (message) => {
+      if (!current()) {
+        return;
+      }
+      this.lastServerMessage = Date.now();
+      try {
+        const { event, data } = JSON.parse(String(message.data));
+        if (event === "hello") {
+          this.socketReady = true;
+        }
+        this.handleEvent(event, data);
+      } catch (error) {
+        console.error("Bad realtime message", error);
+      }
+    };
+    socket.onclose = () => {
+      if (!current()) {
+        return;
+      }
+      this.socket = null;
+      this.socketReady = false;
+      clearInterval(this.keepAliveTimer);
+      this.failPendingAcks();
+      if (!this.everOpened && ++this.socketAttempts >= SOCKET_FALLBACK_AFTER) {
+        // sockets are blocked here (proxy, firewall): use SSE + HTTP instead
+        this.openEventSource();
+        return;
+      }
+      appJotaiStore.set(cloudStatusAtom, { state: "offline" });
+      const delay = Math.min(
+        RECONNECT_BASE_MS * 2 ** Math.min(this.socketAttempts, 5),
+        RECONNECT_MAX_MS,
+      );
+      this.socketAttempts++;
+      this.reconnectTimer = window.setTimeout(() => {
+        if (this.scene === scene) {
+          this.openSocket();
+        }
+      }, delay);
+    };
+    socket.onerror = () => {
+      // followed by `close`, which handles reconnecting
+    };
+  }
+
+  /** Fallback transport: SSE for events, HTTP for everything the client sends. */
+  private openEventSource() {
+    const scene = this.scene;
+    if (!scene) {
+      return;
+    }
     const user = appJotaiStore.get(plusUserAtom);
     const events = new EventSource(
       plusAPI.eventsURL(scene.id, user ? null : "Guest"),
     );
     this.events = events;
-
-    const on = (type: string, handler: (data: any) => void) =>
+    for (const type of [
+      "hello",
+      "presence",
+      "scene-update",
+      "scene-meta",
+      "comment",
+      "signal",
+      "scene-deleted",
+    ]) {
       events.addEventListener(type, (event) => {
         if (this.events !== events) {
           return;
         }
         try {
-          handler(JSON.parse((event as MessageEvent).data));
+          this.handleEvent(type, JSON.parse((event as MessageEvent).data));
         } catch (error) {
           console.error(`Bad "${type}" event`, error);
         }
       });
-
-    on("hello", (data) => {
-      appJotaiStore.set(connectionIdAtom, data.connectionId);
-      if (this.connectedOnce) {
-        this.resync();
-      }
-      this.connectedOnce = true;
-      if (appJotaiStore.get(cloudStatusAtom).state === "offline") {
-        appJotaiStore.set(cloudStatusAtom, { state: "saved", at: Date.now() });
-      }
-    });
-    on("presence", (data: { participants: Participant[] }) => {
-      appJotaiStore.set(participantsAtom, data.participants);
-      this.syncCollaboratorsWithPresence(data.participants);
-      // newcomers learn where everyone's pointer and selection are
-      this.sendPointer();
-    });
-    on("scene-update", (data) => {
-      this.applyRemoteElements(data.elements);
-      if (data.appState?.viewBackgroundColor) {
-        this.syncedBackground = data.appState.viewBackgroundColor;
-        this.api?.updateScene({
-          appState: { viewBackgroundColor: data.appState.viewBackgroundColor },
-          captureUpdate: CaptureUpdateAction.NEVER,
-        });
-      }
-      if (data.fileIds?.length) {
-        this.fetchMissingFiles(data.fileIds);
-      }
-    });
-    on("scene-meta", (data: { name: string; presentation: string[] }) => {
-      if (!this.scene) {
-        return;
-      }
-      this.scene = {
-        ...this.scene,
-        name: data.name,
-        presentation: data.presentation,
-      };
-      this.syncedName = data.name;
-      appJotaiStore.set(cloudSceneAtom, this.scene);
-      if (this.api && this.api.getAppState().name !== data.name) {
-        this.api.updateScene({
-          appState: { name: data.name },
-          captureUpdate: CaptureUpdateAction.NEVER,
-        });
-      }
-    });
-    on("comment", (data) => {
-      const comments = appJotaiStore.get(commentsAtom);
-      if (data.action === "delete") {
-        appJotaiStore.set(
-          commentsAtom,
-          comments.filter(
-            (c) => c.id !== data.commentId && c.parentId !== data.commentId,
-          ),
-        );
-      } else {
-        this.upsertComment(data.comment as PlusComment);
-      }
-    });
-    on("signal", (data: SignalMessage) => {
-      if (data.type === "pointer") {
-        this.onRemotePointer(data.from, data.data);
-        return;
-      }
-      this.signalListeners.forEach((listener) => listener(data));
-    });
-    on("scene-deleted", () => {
-      appJotaiStore.set(cloudStatusAtom, {
-        state: "error",
-        message: "This scene was deleted",
-      });
-      events.close();
-    });
+    }
     events.onerror = () => {
       if (this.events === events) {
         appJotaiStore.set(cloudStatusAtom, { state: "offline" });
       }
     };
+  }
+
+  private get socketOpen() {
+    return (
+      !!this.socket &&
+      this.socketReady &&
+      this.socket.readyState === WebSocket.OPEN
+    );
+  }
+
+  /** Pushes edits over the socket (acknowledged), or HTTP if it's down. */
+  private async syncRemote(
+    sceneId: string,
+    body: Parameters<typeof plusAPI.syncScene>[1],
+  ) {
+    const socket = this.socket;
+    if (socket && this.socketOpen) {
+      try {
+        return await new Promise<{ version: number; accepted: number }>(
+          (resolve, reject) => {
+            const id = String(++this.syncSeq);
+            const timer = window.setTimeout(() => {
+              this.pendingAcks.delete(id);
+              reject(new PlusAPIError(0, "Save timed out"));
+            }, ACK_TIMEOUT_MS);
+            this.pendingAcks.set(id, { resolve, reject, timer });
+            const { elements, appState, files } = body;
+            socket.send(
+              JSON.stringify({ type: "sync", id, elements, appState, files }),
+            );
+          },
+        );
+      } catch (error) {
+        // the server answered (e.g. view-only): that's final. Transport
+        // trouble falls through to HTTP; merging is idempotent.
+        if (!(error instanceof PlusAPIError) || error.status !== 0) {
+          throw error;
+        }
+      }
+    }
+    return plusAPI.syncScene(sceneId, body);
   }
 
   // live pointers ----------------------------------------------------------------
@@ -578,6 +821,12 @@ class CloudSession {
     () => {
       if (!this.scene || !appJotaiStore.get(connectionIdAtom)) {
         return;
+      }
+      if (
+        this.socket &&
+        this.socket.bufferedAmount > POINTER_BACKPRESSURE_BYTES
+      ) {
+        return; // a bulky edit is still uploading; the next move retries
       }
       // never stack requests: only the freshest pointer matters, so while one
       // is on the wire remember that another is due and send it afterwards
@@ -787,6 +1036,12 @@ class CloudSession {
     const from = appJotaiStore.get(connectionIdAtom);
     if (!this.scene || !from) {
       throw new Error("Not connected to the scene");
+    }
+    if (this.socket && this.socketOpen) {
+      this.socket.send(
+        JSON.stringify({ type: "signal", signal: type, to, data }),
+      );
+      return;
     }
     await plusAPI.signal(this.scene.id, { from, to, type, data });
   }

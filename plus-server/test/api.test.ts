@@ -553,6 +553,163 @@ describe("realtime", () => {
   });
 });
 
+describe("realtime over WebSocket", () => {
+  const connect = (url: string) =>
+    new Promise<{
+      next: (event: string) => Promise<any>;
+      send: (message: unknown) => void;
+      close: () => void;
+    }>((resolve, reject) => {
+      const ws = new WebSocket(url.replace(/^http/, "ws"));
+      const queue: { event: string; data: any }[] = [];
+      const waiting: (() => void)[] = [];
+      ws.onmessage = (message) => {
+        queue.push(JSON.parse(String(message.data)));
+        waiting.splice(0).forEach((wake) => wake());
+      };
+      ws.onerror = () => reject(new Error("socket error"));
+      const next = async (event: string) => {
+        for (;;) {
+          const found = queue.findIndex((e) => e.event === event);
+          if (found >= 0) {
+            return queue.splice(found, 1)[0].data;
+          }
+          await new Promise<void>((wake) => waiting.push(wake));
+        }
+      };
+      ws.onopen = () =>
+        resolve({
+          next,
+          send: (message) => ws.send(JSON.stringify(message)),
+          close: () => ws.close(),
+        });
+    });
+
+  test("syncs edits, relays pointers and enforces roles", async () => {
+    const { api } = await signUp(server.base, "wsowner");
+    const scene = (await api.post("/api/v1/scenes", { name: "WS" })).json.scene;
+    const links = async (role: string) =>
+      (await api.post(`/api/v1/scenes/${scene.id}/links`, { role })).json.links;
+    const editorToken = (await links("editor")).find(
+      (l: any) => l.role === "editor",
+    ).token;
+    const viewerToken = (await links("viewer")).find(
+      (l: any) => l.role === "viewer",
+    ).token;
+    const url = (token: string, name: string) =>
+      `${server.base}/api/v1/scenes/${scene.id}/ws?share=${token}&name=${name}`;
+
+    const alice = await connect(url(editorToken, "Alice"));
+    const aliceId = (await alice.next("hello")).connectionId;
+    const bob = await connect(url(viewerToken, "Bob"));
+    await bob.next("hello");
+
+    // an edit is acked to the sender, pushed to the others, and persisted
+    alice.send({
+      type: "sync",
+      id: "1",
+      elements: [element("ws-el", 1)],
+    });
+    const ack = await alice.next("sync-ack");
+    assert.equal(ack.id, "1");
+    assert.equal(ack.accepted, 1);
+    const update = await bob.next("scene-update");
+    assert.deepEqual(
+      update.elements.map((e: any) => e.id),
+      ["ws-el"],
+    );
+    const saved = (await api.get(`/api/v1/scenes/${scene.id}`)).json.scene;
+    assert.deepEqual(
+      saved.elements.map((e: any) => e.id),
+      ["ws-el"],
+    );
+
+    // a viewer can't edit
+    bob.send({ type: "sync", id: "2", elements: [element("nope", 1)] });
+    const denied = await bob.next("sync-error");
+    assert.equal(denied.id, "2");
+    assert.equal(denied.status, 403);
+
+    // pointers are relayed to everyone else
+    alice.send({
+      type: "signal",
+      signal: "pointer",
+      data: { pointer: { x: 1, y: 2, tool: "pointer" } },
+    });
+    const pointer = await bob.next("signal");
+    assert.equal(pointer.type, "pointer");
+    assert.equal(pointer.from, aliceId);
+
+    alice.send({ type: "ping", t: 7 });
+    assert.deepEqual(await alice.next("pong"), { t: 7 });
+
+    alice.close();
+    bob.close();
+  });
+
+  test("carries large and rapid messages intact", async () => {
+    const { api } = await signUp(server.base, "wsbig");
+    const scene = (await api.post("/api/v1/scenes", { name: "Big" })).json
+      .scene;
+    const token = (
+      await api.post(`/api/v1/scenes/${scene.id}/links`, { role: "editor" })
+    ).json.links[0].token;
+    const url = `${server.base}/api/v1/scenes/${scene.id}/ws?share=${token}`;
+    const alice = await connect(url);
+    await alice.next("hello");
+    const bob = await connect(url);
+    await bob.next("hello");
+
+    // > 64 KiB exercises the 64-bit frame length path
+    const dataURL = `data:image/png;base64,${"A".repeat(300_000)}`;
+    alice.send({
+      type: "sync",
+      id: "big",
+      elements: [element("img", 1, { type: "image", fileId: "f1" })],
+      files: { f1: { id: "f1", mimeType: "image/png", dataURL } },
+    });
+    assert.equal((await alice.next("sync-ack")).accepted, 1);
+    assert.deepEqual((await bob.next("scene-update")).fileIds, ["f1"]);
+    const files = (await api.get(`/api/v1/scenes/${scene.id}/files`)).json
+      .files;
+    assert.equal(files.f1.dataURL.length, dataURL.length);
+
+    // a burst of back-to-back edits all arrive, in order
+    for (let version = 2; version <= 51; version++) {
+      alice.send({
+        type: "sync",
+        id: `v${version}`,
+        elements: [element("burst", version, { x: version })],
+      });
+    }
+    let last = 0;
+    while (last < 51) {
+      const update = await bob.next("scene-update");
+      const burst = update.elements.find((e: any) => e.id === "burst");
+      if (burst) {
+        assert.ok(burst.version > last);
+        last = burst.version;
+      }
+    }
+    alice.close();
+    bob.close();
+  });
+
+  test("rejects sockets without access", async () => {
+    const { api } = await signUp(server.base, "wsprivate");
+    const scene = (await api.post("/api/v1/scenes", { name: "Private" })).json
+      .scene;
+    const failed = await new Promise<boolean>((resolve) => {
+      const ws = new WebSocket(
+        `${server.base.replace(/^http/, "ws")}/api/v1/scenes/${scene.id}/ws`,
+      );
+      ws.onopen = () => resolve(false);
+      ws.onerror = () => resolve(true);
+    });
+    assert.equal(failed, true);
+  });
+});
+
 describe("AI", () => {
   test("streams in the editor's SSE format and enforces the daily limit", async () => {
     const limited = await startTestServer({ aiDailyLimit: 1 });

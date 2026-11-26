@@ -141,9 +141,7 @@ const Thread = ({
                 <strong className="plus-comment__author">
                   {comment.author.name}
                 </strong>
-                <span className="plus-muted">
-                  {timeAgo(comment.createdAt)}
-                </span>
+                <span className="plus-muted">{timeAgo(comment.createdAt)}</span>
                 {isOwn && !confirming && (
                   <button
                     className="plus-comment__delete"
