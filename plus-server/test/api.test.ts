@@ -554,6 +554,27 @@ describe("realtime", () => {
 });
 
 describe("AI", () => {
+  test("chat endpoint streams and rejects an empty conversation", async () => {
+    const server = await startTestServer();
+    try {
+      const ok = await fetch(`${server.base}/api/v1/ai/chat/streaming`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: [{ role: "user", content: "hi" }] }),
+      });
+      assert.equal(ok.status, 200);
+      assert.match(await ok.text(), /"type":"content"/);
+      const bad = await fetch(`${server.base}/api/v1/ai/chat/streaming`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: [] }),
+      });
+      assert.equal(bad.status, 400);
+    } finally {
+      await server.close();
+    }
+  });
+
   test("streams in the editor's SSE format and enforces the daily limit", async () => {
     const limited = await startTestServer({ aiDailyLimit: 1 });
     try {

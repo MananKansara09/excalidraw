@@ -22,6 +22,7 @@ import { goToSignIn } from "../auth";
 
 import { AccountDialog } from "./AccountDialog";
 import { CloudShareDialog } from "./CloudShareDialog";
+import { ClaudeChat } from "./ClaudeChat";
 import { CommentPins } from "./Comments";
 import { ExportFramesDialog } from "./ExportFramesDialog";
 import { HangoutMedia } from "./HangoutControls";
@@ -283,6 +284,7 @@ export const PlusRoot = ({ api }: { api: ExcalidrawImperativeAPI }) => {
         <SaveToCloudDialog api={api} />
       )}
       {scene && <CommentPins api={api} />}
+      <ClaudeChat api={api} />
       <PresentationMode api={api} />
       <HangoutMedia />
     </>

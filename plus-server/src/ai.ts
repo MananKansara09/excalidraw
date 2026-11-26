@@ -76,6 +76,10 @@ Reply with Mermaid code only: no prose before or after it, and no Markdown code 
 
 When the conversation already contains a diagram and the user asks for a change, reply with the complete updated diagram.`;
 
+const CHAT_SYSTEM = `You are Claude, an assistant built into a whiteboard app (Excalidraw). Answer concisely in plain text or light Markdown.
+
+When the user asks you to draw, diagram, map out or visualize something, include exactly one Mermaid diagram in a fenced code block tagged "mermaid" (prefer "flowchart TD"; use sequenceDiagram, classDiagram, erDiagram or stateDiagram-v2 when clearly appropriate), with a one-line description before it. Keep labels short, quote labels that contain punctuation, and avoid styling directives. When changing an earlier diagram, reply with the complete updated diagram. Otherwise do not include a diagram.`;
+
 const DIAGRAM_TO_CODE_SYSTEM = `You turn a hand-drawn wireframe into a working web page.
 
 You get an image of the wireframe and the text found in it. Reply with one complete, self-contained HTML document: inline CSS, and inline JavaScript only where an element is plainly interactive. Follow the wireframe's layout and use its text verbatim. Replace scribbled placeholders with sensible content, and use no external resources other than images from https://placehold.co.
@@ -260,6 +264,15 @@ export const registerAIRoutes = (
     const messages = validateMessages(body.messages);
     await streamToClient(ctx, req, res, getUser(req), {
       system: TEXT_TO_DIAGRAM_SYSTEM,
+      messages,
+    });
+  });
+
+  router.post("/api/v1/ai/chat/streaming", async (req, res) => {
+    const body = await req.body();
+    const messages = validateMessages(body.messages);
+    await streamToClient(ctx, req, res, getUser(req), {
+      system: CHAT_SYSTEM,
       messages,
     });
   });
