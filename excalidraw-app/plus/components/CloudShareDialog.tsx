@@ -2,14 +2,20 @@ import { Dialog } from "@excalidraw/excalidraw/components/Dialog";
 import { useEffect, useState } from "react";
 
 import { useAtomValue, useSetAtom } from "../../app-jotai";
+import { knownUsersAtom } from "../../notifications";
 import { plusAPI } from "../api";
 import { getShareURL } from "../cloud";
-import { cloudSceneAtom, participantsAtom, plusDialogAtom } from "../state";
+import {
+  cloudSceneAtom,
+  participantsAtom,
+  plusDialogAtom,
+  plusUserAtom,
+} from "../state";
 
 import {
   CopyField,
   ErrorText,
-  initials,
+  PlusAvatar,
   RoleSelect,
   SmallButton,
   useAsyncAction,
@@ -33,6 +39,8 @@ export const CloudShareDialog = () => {
   const scene = useAtomValue(cloudSceneAtom);
   const participants = useAtomValue(participantsAtom);
   const live = participants.find((p) => p.presenting);
+  const currentUser = useAtomValue(plusUserAtom);
+  const knownUsers = useAtomValue(knownUsersAtom);
   const [access, setAccess] = useState<SceneAccess | null>(null);
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<"editor" | "viewer">("editor");
@@ -126,11 +134,59 @@ export const CloudShareDialog = () => {
                   Share
                 </SmallButton>
               </form>
+              {(() => {
+                const existingEmails = new Set([
+                  access.owner.email.toLowerCase(),
+                  ...access.collaborators.map((c) => c.email.toLowerCase()),
+                ]);
+                const quickAdd = knownUsers
+                  .filter(
+                    (u) =>
+                      u.email &&
+                      u.id !== currentUser?.id &&
+                      !existingEmails.has(u.email.toLowerCase()),
+                  )
+                  .slice(0, 5);
+                if (!quickAdd.length) {
+                  return null;
+                }
+                return (
+                  <div
+                    className="plus-muted"
+                    style={{
+                      display: "flex",
+                      flexWrap: "wrap",
+                      gap: "0.35rem",
+                      alignItems: "center",
+                    }}
+                  >
+                    <span>Quick assign:</span>
+                    {quickAdd.map((person) => (
+                      <SmallButton
+                        key={person.id}
+                        disabled={pending}
+                        onClick={() =>
+                          update(
+                            plusAPI.shareWithUser(
+                              scene.id,
+                              person.email!,
+                              role,
+                            ),
+                          )
+                        }
+                      >
+                        +{person.username}
+                      </SmallButton>
+                    ))}
+                  </div>
+                );
+              })()}
               <ul className="plus-list">
                 <li className="plus-list__row">
-                  <span className="plus-avatar" aria-hidden="true">
-                    {initials(access.owner.name)}
-                  </span>
+                  <PlusAvatar
+                    name={access.owner.name}
+                    avatarUrl={access.owner.avatarUrl}
+                  />
                   <span className="plus-list__main">
                     <span>{access.owner.name}</span>
                     <span className="plus-muted">{access.owner.email}</span>
@@ -139,9 +195,10 @@ export const CloudShareDialog = () => {
                 </li>
                 {access.collaborators.map((person) => (
                   <li key={person.userId} className="plus-list__row">
-                    <span className="plus-avatar" aria-hidden="true">
-                      {initials(person.name)}
-                    </span>
+                    <PlusAvatar
+                      name={person.name}
+                      avatarUrl={person.avatarUrl}
+                    />
                     <span className="plus-list__main">
                       <span>{person.name}</span>
                       <span className="plus-muted">{person.email}</span>

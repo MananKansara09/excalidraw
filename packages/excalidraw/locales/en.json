@@ -762,6 +762,28 @@
       "inCall": "User is in a voice call",
       "micMuted": "User's microphone is muted",
       "isSpeaking": "User is speaking"
+    },
+    "profile": {
+      "follow": "Follow screen",
+      "following": "Following",
+      "stopFollowing": "Stop following",
+      "followHint": "Follow their screen navigation and actions",
+      "currentActivity": "Activity",
+      "status": {
+        "active": "Active",
+        "idle": "Idle",
+        "away": "Away"
+      },
+      "activity": {
+        "viewing": "Viewing canvas",
+        "editingText": "Editing text",
+        "panning": "Navigating canvas",
+        "laser": "Using laser pointer",
+        "eraser": "Erasing",
+        "drawing": "Drawing",
+        "selecting": "Selecting elements",
+        "hand": "Navigating canvas"
+      }
     }
   },
   "commandPalette": {

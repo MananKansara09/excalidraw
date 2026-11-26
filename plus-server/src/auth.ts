@@ -22,6 +22,7 @@ export type User = {
   id: string;
   email: string;
   name: string;
+  avatar_url: string | null;
   created_at: number;
   ai_key_enc: string | null;
 };
@@ -30,6 +31,7 @@ export const publicUser = (user: User) => ({
   id: user.id,
   email: user.email,
   name: user.name,
+  avatarUrl: user.avatar_url ?? null,
   createdAt: user.created_at,
   hasAIKey: !!user.ai_key_enc,
 });

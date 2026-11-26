@@ -7,6 +7,7 @@ import throttle from "lodash.throttle";
 import type { UserIdleState } from "@excalidraw/common";
 import type { OrderedExcalidrawElement } from "@excalidraw/element/types";
 import type {
+  CollaboratorActivity,
   OnUserFollowedPayload,
   SocketId,
 } from "@excalidraw/excalidraw/types";
@@ -19,6 +20,7 @@ import type {
   SocketUpdateDataSource,
   SyncableExcalidrawElement,
 } from "../data";
+import type { AppNotification } from "../notifications";
 import type { TCollabClass } from "./Collab";
 import type { Socket } from "socket.io-client";
 
@@ -202,6 +204,7 @@ class Portal {
   broadcastMouseLocation = (payload: {
     pointer: SocketUpdateDataSource["MOUSE_LOCATION"]["payload"]["pointer"];
     button: SocketUpdateDataSource["MOUSE_LOCATION"]["payload"]["button"];
+    activity?: CollaboratorActivity;
   }) => {
     if (this.socket?.id) {
       const data: SocketUpdateDataSource["MOUSE_LOCATION"] = {
@@ -213,6 +216,7 @@ class Portal {
           selectedElementIds:
             this.collab.excalidrawAPI.getAppState().selectedElementIds,
           username: this.collab.state.username,
+          ...(payload.activity ? { activity: payload.activity } : {}),
         },
       };
 
@@ -251,6 +255,16 @@ class Portal {
     if (this.socket?.id) {
       this.socket.emit(WS_EVENTS.USER_FOLLOW_CHANGE, payload);
     }
+  };
+
+  broadcastNotification = (notification: AppNotification) => {
+    const data: SocketUpdateDataSource["NOTIFICATION"] = {
+      type: WS_SUBTYPES.NOTIFICATION,
+      payload: {
+        notification,
+      },
+    };
+    return this._broadcastSocketData(data as SocketUpdateData, false);
   };
 }
 
