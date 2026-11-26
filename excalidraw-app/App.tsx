@@ -864,6 +864,9 @@ const ExcalidrawWrapper = () => {
       collabAPI.syncElements(elements);
     }
 
+    // pushes this user's edits to the cloud scene's other collaborators
+    cloudSession.onLocalChange(elements, appState);
+
     void notificationEngine
       .processCanvasElements(elements, {
         editingElementId: appState.editingTextElement?.id ?? null,

@@ -130,6 +130,7 @@ class CloudSession {
   private socketAttempts = 0;
   private everOpened = false;
   private reconnectTimer = 0;
+  private sseAttempts = 0;
   private keepAliveTimer = 0;
   private lastServerMessage = 0;
   private syncSeq = 0;
@@ -676,6 +677,7 @@ class CloudSession {
     this.socket = null;
     this.socketReady = false;
     this.socketAttempts = 0;
+    this.sseAttempts = 0;
     this.everOpened = false;
     clearTimeout(this.reconnectTimer);
     clearInterval(this.keepAliveTimer);
@@ -819,10 +821,31 @@ class CloudSession {
         }
       });
     }
+    events.onopen = () => {
+      this.sseAttempts = 0;
+    };
     events.onerror = () => {
-      if (this.events === events) {
-        appJotaiStore.set(cloudStatusAtom, { state: "offline" });
+      if (this.events !== events) {
+        return;
       }
+      appJotaiStore.set(cloudStatusAtom, { state: "offline" });
+      if (events.readyState !== EventSource.CLOSED) {
+        return; // the browser is retrying by itself
+      }
+      // The browser gives up for good when a reconnect gets an HTTP error (a
+      // proxy answering 502 while the server restarts). Reopen it ourselves:
+      // the next "hello" resyncs what was missed.
+      const delay = Math.min(
+        RECONNECT_BASE_MS * 2 ** Math.min(this.sseAttempts++, 5),
+        RECONNECT_MAX_MS,
+      );
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = window.setTimeout(() => {
+        if (this.scene === scene && this.events === events) {
+          events.close();
+          this.openEventSource();
+        }
+      }, delay);
     };
   }
 
