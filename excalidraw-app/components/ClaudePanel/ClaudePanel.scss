@@ -141,7 +141,8 @@ $serif: ui-serif, "Iowan Old Style", "Palatino Linotype", Georgia, serif;
   position: absolute;
   left: 50%;
   bottom: 16px;
-  z-index: 5;
+  // under editor menus, like the bar above it
+  z-index: 4;
   display: flex;
   align-items: center;
   padding: 5px;
@@ -356,17 +357,30 @@ $serif: ui-serif, "Iowan Old Style", "Palatino Linotype", Georgia, serif;
   left: 50%;
   // above the assistants' plate
   bottom: 76px;
+  // ties with the editor's UI layer, which paints later, so the main menu and
+  // other editor popups open over the bar
   z-index: 4;
   width: min(560px, calc(100% - 200px));
   transform: translateX(-50%);
   display: flex;
   flex-direction: column;
   gap: 8px;
+  // that layer also holds the welcome screen, which must not bleed through the
+  // bar's own open model menu
+  &:has(.claude-model-menu) {
+    z-index: 5;
+  }
   &.dragging {
     outline: 2px dashed var(--cl-accent);
     outline-offset: 6px;
     border-radius: 18px;
   }
+}
+
+// an empty board's welcome screen makes room for the open bar, as far as the
+// window's height allows without running into the toolbar
+.excalidraw:has(.claude-root:not([hidden]) .claude-bar) .welcome-screen-center {
+  bottom: clamp(1rem, calc(100% - 660px), 160px);
 }
 
 .claude-root .claude-bar-lines {
