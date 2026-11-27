@@ -272,6 +272,9 @@ export const ClaudePanel = ({
   const [logs, setLogs] = useState<LogEvent[]>([]);
   const [chats, setChats] = useState<Chat[]>(loadChats);
   const [chatId, setChatId] = useState(newChatId);
+  /** user-message id of the checkpoint shown in the bar (null = latest) */
+  const [focusId, setFocusId] = useState<number | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [input, setInput] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [fileError, setFileError] = useState("");
@@ -327,6 +330,16 @@ export const ClaudePanel = ({
       behavior: "smooth",
     });
   }, [messages, logs, view, open]);
+
+  // close the "⋯" menu on any outside click
+  useEffect(() => {
+    if (!menuOpen) {
+      return;
+    }
+    const close = () => setMenuOpen(false);
+    document.addEventListener("click", close);
+    return () => document.removeEventListener("click", close);
+  }, [menuOpen]);
 
   useEffect(() => {
     if (open && mode === "panel") {
@@ -461,6 +474,7 @@ export const ClaudePanel = ({
     }
     const sent = files;
     const userId = nextId.current++;
+    setFocusId(null);
     checkpoints.current.set(userId, [
       ...excalidrawAPI.getSceneElementsIncludingDeleted(),
     ]);
@@ -602,6 +616,8 @@ export const ClaudePanel = ({
     stop();
     sessionId.current = undefined;
     checkpoints.current.clear();
+    setFocusId(null);
+    setMenuOpen(false);
     setMessages([]);
     setLogs([]);
     setChatId(newChatId());
@@ -615,6 +631,8 @@ export const ClaudePanel = ({
   const openChat = (chat: Chat) => {
     stop();
     checkpoints.current.clear();
+    setFocusId(null);
+    setMenuOpen(false);
     sessionId.current = chat.sessionId;
     nextId.current =
       Math.max(
@@ -691,26 +709,34 @@ export const ClaudePanel = ({
   };
 
   const userMessages = messages.filter((m) => m.role === "user");
-  const lastUser = userMessages[userMessages.length - 1];
-  const lastClaude = [...messages]
-    .reverse()
-    .find((m) => m.role === "assistant");
-  const liveClaude = busy && lastClaude === messages[messages.length - 1];
-  // earlier prompts, newest closest to the bar
-  const stack = userMessages.slice(0, -1).slice(-6).reverse();
+  // the checkpoint shown in the bar: the one picked from the circles, else the latest
+  const shownUser =
+    userMessages.find((m) => m.id === focusId) ??
+    userMessages[userMessages.length - 1];
+  const shownIndex = shownUser ? messages.indexOf(shownUser) : -1;
+  const shownClaude =
+    shownIndex >= 0 && messages[shownIndex + 1]?.role === "assistant"
+      ? messages[shownIndex + 1]
+      : undefined;
+  const liveClaude = busy && shownClaude === messages[messages.length - 1];
+  // every other chat, newest closest to the bar
+  const otherChats = ownChats.filter((c) => c.id !== chatId).slice(0, 5);
+  // one circle per prompt of this chat = a checkpoint
+  const dots = userMessages.slice(-8);
+  const canRestoreShown = !!shownUser && checkpoints.current.has(shownUser.id);
 
   const claudeLine = (() => {
-    if (!lastClaude) {
+    if (!shownClaude) {
       return null;
     }
-    if (lastClaude.text) {
-      return oneLine(lastClaude.text);
+    if (shownClaude.text) {
+      return oneLine(shownClaude.text);
     }
     if (liveClaude) {
-      const tool = lastClaude.tools[lastClaude.tools.length - 1];
+      const tool = shownClaude.tools[shownClaude.tools.length - 1];
       return tool ? `${TOOL_LABELS[tool] || tool}…` : "Thinking…";
     }
-    return lastClaude.tools.length ? "Done" : "";
+    return shownClaude.tools.length ? "Done" : "";
   })();
 
   const mark = (cls?: string) => (
@@ -826,31 +852,42 @@ export const ClaudePanel = ({
           aria-label="Claude"
           {...dropProps}
         >
-          {stack.length > 0 && (
-            <div className="claude-stack" aria-label="Earlier prompts">
-              {stack.map((m, i) => {
-                const canRestore = checkpoints.current.has(m.id);
-                return (
-                  <button
-                    key={m.id}
-                    type="button"
-                    className="claude-cp"
-                    style={{ "--depth": i } as React.CSSProperties}
-                    disabled={!canRestore || busy}
-                    title={
-                      canRestore
-                        ? "Checkpoint: restore the canvas to before this prompt"
-                        : "Checkpoint (canvas can't be restored after a reload)"
-                    }
-                    onClick={() => restoreCheckpoint(m.id)}
-                  >
-                    <span className="claude-cp-icon">
-                      {canRestore ? "↺" : "●"}
-                    </span>
-                    <span className="claude-cp-text">{oneLine(m.text)}</span>
-                  </button>
-                );
-              })}
+          {ready && dots.length > 0 && (
+            <div className="claude-dots" aria-label="Checkpoints">
+              {dots.map((m) => (
+                <button
+                  key={m.id}
+                  type="button"
+                  className={clsx("claude-dot-cp", {
+                    active: m.id === shownUser?.id,
+                    saved: checkpoints.current.has(m.id),
+                  })}
+                  title={oneLine(m.text)}
+                  aria-label={`Checkpoint: ${oneLine(m.text)}`}
+                  aria-pressed={m.id === shownUser?.id}
+                  onClick={() => {
+                    setFocusId(m.id);
+                    setMenuOpen(false);
+                  }}
+                />
+              ))}
+            </div>
+          )}
+          {ready && otherChats.length > 0 && (
+            <div className="claude-stack" aria-label="Other chats">
+              {otherChats.map((c, i) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  className="claude-cp"
+                  style={{ "--depth": i } as React.CSSProperties}
+                  title="Open this chat"
+                  onClick={() => openChat(c)}
+                >
+                  <span className="claude-cp-icon">↺</span>
+                  <span className="claude-cp-text">{oneLine(c.title)}</span>
+                </button>
+              ))}
             </div>
           )}
           {!ready && status?.state !== undefined && (
@@ -864,30 +901,86 @@ export const ClaudePanel = ({
                 : "Connect Claude to start — open the side panel"}
             </button>
           )}
-          {ready && (lastUser || lastClaude) && (
+          {ready && (shownUser || shownClaude) && (
             <div className="claude-bar-lines">
-              {lastUser && (
+              {shownUser && (
                 <div className="claude-bar-line user">
                   <span className="claude-bar-prompt">&gt;</span>
                   <span className="claude-bar-text">
-                    {oneLine(lastUser.text)}
+                    {oneLine(shownUser.text)}
                   </span>
+                  <div
+                    className="claude-more"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <button
+                      type="button"
+                      className="claude-icon-btn"
+                      title="More"
+                      aria-label="More"
+                      aria-expanded={menuOpen}
+                      onClick={() => setMenuOpen((o) => !o)}
+                    >
+                      ⋯
+                    </button>
+                    {menuOpen && (
+                      <div className="claude-menu" role="menu">
+                        <button
+                          type="button"
+                          role="menuitem"
+                          disabled={!canRestoreShown || busy}
+                          title={
+                            canRestoreShown
+                              ? undefined
+                              : "The canvas can't be restored after a reload"
+                          }
+                          onClick={() => {
+                            setMenuOpen(false);
+                            shownUser && restoreCheckpoint(shownUser.id);
+                          }}
+                        >
+                          ↺ Restore canvas to before this
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => {
+                            setMenuOpen(false);
+                            newChat();
+                          }}
+                        >
+                          + New chat
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="danger"
+                          onClick={() => {
+                            setMenuOpen(false);
+                            deleteChat(chatId);
+                          }}
+                        >
+                          Delete this chat
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
-              {lastClaude && claudeLine !== "" && (
+              {shownClaude && claudeLine !== "" && (
                 <div
                   className={clsx("claude-bar-line", {
-                    error: lastClaude.error,
+                    error: shownClaude.error,
                   })}
                 >
-                  {liveClaude && !lastClaude.text ? (
+                  {liveClaude && !shownClaude.text ? (
                     <Spinner />
                   ) : (
                     <span className="claude-dot">●</span>
                   )}
                   <span
                     className={clsx("claude-bar-text", {
-                      "claude-shimmer": liveClaude && !lastClaude.text,
+                      "claude-shimmer": liveClaude && !shownClaude.text,
                     })}
                   >
                     {claudeLine}
