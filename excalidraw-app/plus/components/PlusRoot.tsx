@@ -31,7 +31,6 @@ import { openCloudScene, saveCanvasToCloud } from "../scenes";
 
 import { folderTree } from "../folders";
 
-import { AccountDialog } from "./AccountDialog";
 import { CloudShareDialog } from "./CloudShareDialog";
 import { CommentPins } from "./Comments";
 import { ExportFramesDialog } from "./ExportFramesDialog";
@@ -410,21 +409,22 @@ export const PlusRoot = ({ api }: { api: ExcalidrawImperativeAPI }) => {
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [dialog, setDialog]);
 
-  // the workspace is its own page, which asks to sign in if need be
+  // the workspace is its own page, which asks to sign in if need be.
+  // Profile settings are one of its views.
   useEffect(() => {
-    if (dialog?.name === "workspace") {
+    if (dialog?.name === "workspace" || dialog?.name === "account") {
       setDialog(null);
-      window.location.assign(APP_ROUTES.dashboard);
+      window.location.assign(
+        dialog.name === "account"
+          ? `${APP_ROUTES.dashboard}?settings=profile`
+          : APP_ROUTES.dashboard,
+      );
     }
   }, [dialog, setDialog]);
 
   // dialogs that need an account ask to sign in first
   useEffect(() => {
-    if (
-      user === null &&
-      dialog &&
-      ["account", "save-to-cloud"].includes(dialog.name)
-    ) {
+    if (user === null && dialog?.name === "save-to-cloud") {
       setDialog(null);
       goToSignIn("signin", "workspace");
     }
@@ -432,7 +432,6 @@ export const PlusRoot = ({ api }: { api: ExcalidrawImperativeAPI }) => {
 
   return (
     <>
-      {dialog?.name === "account" && user && <AccountDialog />}
       {dialog?.name === "share" && scene && <CloudShareDialog />}
       {dialog?.name === "export-frames" && <ExportFramesDialog api={api} />}
       {dialog?.name === "save-to-cloud" && user && (

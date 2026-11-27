@@ -624,7 +624,7 @@ export const registerMCPRoutes = (router: Router, ctx: AppContext) => {
     } catch {
       res.setHeader(
         "WWW-Authenticate",
-        'Bearer realm="excalidraw-plus", error="invalid_token", error_description="Create an API key in Account settings and send it as a Bearer token"',
+        'Bearer realm="excalidraw-plus", error="invalid_token", error_description="Create an API key in Profile settings and send it as a Bearer token"',
       );
       throw new HttpError(401, "API key required");
     }

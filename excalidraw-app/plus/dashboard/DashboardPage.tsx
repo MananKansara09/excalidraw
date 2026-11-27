@@ -2,18 +2,27 @@ import clsx from "clsx";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { STORAGE_KEYS } from "../../app_constants";
-import { appJotaiStore, Provider } from "../../app-jotai";
+import { appJotaiStore, Provider, useAtomValue } from "../../app-jotai";
+import {
+  notificationEngine,
+  unreadNotificationCountAtom,
+} from "../../notifications";
 import { plusAPI, PlusAPIError, sceneThumbnailURL } from "../api";
 import { goToSignIn } from "../auth";
 import { MentionsPanel } from "../components/MentionsPanel";
 import { TeamPanel } from "../components/TeamPanel";
 import { AvatarContent, timeAgo, useAsyncAction } from "../components/ui";
 import { folderAncestry, folderDescendants, folderTree } from "../folders";
+import { startPlusNotificationsSync } from "../notificationsSync";
 import { openCloudScene, watchCloudPresentation } from "../scenes";
+import { plusUserAtom } from "../state";
 
 import { FormModal, ModalProvider, useModal } from "./Modal";
+import { parseSettingsTab, SettingsPage } from "./SettingsPage";
 
 import "./dashboard.scss";
+
+import type { SettingsTab } from "./SettingsPage";
 
 import type {
   Folder,
@@ -27,7 +36,8 @@ type View =
   | { kind: "scenes" }
   | { kind: "shared" }
   | { kind: "mentions" }
-  | { kind: "members" };
+  | { kind: "members" }
+  | { kind: "settings"; tab: SettingsTab };
 
 type SortKey = "created" | "updated" | "name";
 
@@ -90,6 +100,7 @@ const ICONS = {
   sort: "M7 4v16M7 20l-3-3M7 20l3-3M17 20V4M17 4l-3 3M17 4l3 3",
   chevron: "M6 9l6 6 6-6",
   chevronRight: "M9 6l6 6-6 6",
+  user: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21a8 8 0 0 1 16 0",
   folderPlus:
     "M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM12 11v6M9 14h6",
 };
@@ -98,14 +109,13 @@ const ICONS = {
 
 export const DashboardPage = () => {
   const [theme] = useState(getTheme);
-  const [user, setUser] = useState<PlusUser | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
 
   useEffect(() => {
     document.title = "Dashboard | Excalidraw";
     plusAPI
       .me()
-      .then(({ user }) => setUser(user))
+      .then(({ user }) => appJotaiStore.set(plusUserAtom, user))
       .catch((error) => {
         if (error instanceof PlusAPIError && error.status === 401) {
           goToSignIn("signin", "workspace");
@@ -117,17 +127,51 @@ export const DashboardPage = () => {
 
   return (
     <div className={`dash theme--${theme}`}>
-      {user ? (
-        <Provider store={appJotaiStore}>
-          <ModalProvider>
-            <Dashboard user={user} theme={theme} />
-          </ModalProvider>
-        </Provider>
-      ) : (
-        <div className="dash__splash" role="status">
-          {failed ?? "Loading…"}
-        </div>
-      )}
+      <Provider store={appJotaiStore}>
+        <SignedInDashboard theme={theme} failed={failed} />
+      </Provider>
+    </div>
+  );
+};
+
+const SignedInDashboard = ({
+  theme,
+  failed,
+}: {
+  theme: "light" | "dark";
+  failed: string | null;
+}) => {
+  const user = useAtomValue(plusUserAtom);
+
+  // the editor isn't mounted here: run the notification engine ourselves,
+  // once per account (not again when the name or avatar changes)
+  const userId = user?.id;
+  useEffect(() => {
+    const current = appJotaiStore.get(plusUserAtom);
+    if (!userId || !current) {
+      return;
+    }
+    let stopped = false;
+    let stopSync: (() => void) | null = null;
+    notificationEngine.init().then(() => {
+      if (!stopped) {
+        stopSync = startPlusNotificationsSync(current);
+      }
+    });
+    return () => {
+      stopped = true;
+      stopSync?.();
+      notificationEngine.destroy();
+    };
+  }, [userId]);
+
+  return user ? (
+    <ModalProvider>
+      <Dashboard user={user} theme={theme} />
+    </ModalProvider>
+  ) : (
+    <div className="dash__splash" role="status">
+      {failed ?? "Loading…"}
     </div>
   );
 };
@@ -168,9 +212,16 @@ const Dashboard = ({
       clearInterval(interval);
     };
   }, []);
-  const [view, setView] = useState<View>({
-    kind: openTeamId ? "members" : "scenes",
+  // `?settings=<tab>` is where the editor's profile button leads
+  const [view, setView] = useState<View>(() => {
+    const tab = parseSettingsTab(
+      new URLSearchParams(window.location.search).get("settings"),
+    );
+    return tab
+      ? { kind: "settings", tab }
+      : { kind: openTeamId ? "members" : "scenes" };
   });
+  const unreadNotifications = useAtomValue(unreadNotificationCountAtom);
   /** `null` is the workspace's top level (Private / General). */
   const [folderId, setFolderId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -197,6 +248,9 @@ const Dashboard = ({
   const load = useCallback(
     () =>
       run(async () => {
+        if (view.kind === "settings") {
+          return;
+        }
         if (view.kind === "shared") {
           setFolders([]);
           setScenes((await plusAPI.listScenes({ scope: "shared" })).scenes);
@@ -304,7 +358,10 @@ const Dashboard = ({
     .sort((a, b) => a.name.localeCompare(b.name));
 
   const currentFolder = folders.find((folder) => folder.id === folderId);
-  const searching = query.trim().length > 0 && view.kind !== "mentions";
+  const searching =
+    query.trim().length > 0 &&
+    view.kind !== "mentions" &&
+    view.kind !== "settings";
 
   const visibleScenes = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -583,7 +640,9 @@ const Dashboard = ({
   // render --------------------------------------------------------------------
 
   const title =
-    view.kind === "shared"
+    view.kind === "settings"
+      ? "Profile settings"
+      : view.kind === "shared"
       ? "Shared with me"
       : view.kind === "mentions"
       ? "Mentions"
@@ -594,10 +653,12 @@ const Dashboard = ({
       : currentFolder?.name ?? rootName;
 
   const description =
-    view.kind === "shared"
+    view.kind === "settings"
+      ? "Your profile, keys and notifications."
+      : view.kind === "shared"
       ? "Scenes other people shared with you."
       : view.kind === "mentions"
-      ? "Comments where someone mentioned you."
+      ? "Scenes where someone mentioned you in a comment."
       : view.kind === "members"
       ? "Invite people and manage their roles."
       : searching
@@ -621,16 +682,22 @@ const Dashboard = ({
     <div className="dash__layout">
       <aside className="dash-sidebar">
         <div className="dash-sidebar__user">
-          <span className="dash-avatar" aria-hidden="true">
-            <AvatarContent
-              name={user.name || user.email}
-              avatarUrl={user.avatarUrl}
-              imgClassName="dash-avatar__img"
-            />
-          </span>
-          <span className="dash-sidebar__user-name">
-            {user.name || user.email}
-          </span>
+          <button
+            className="dash-sidebar__profile"
+            onClick={() => goToView({ kind: "settings", tab: "profile" })}
+            title="Profile settings"
+          >
+            <span className="dash-avatar" aria-hidden="true">
+              <AvatarContent
+                name={user.name || user.email}
+                avatarUrl={user.avatarUrl}
+                imgClassName="dash-avatar__img"
+              />
+            </span>
+            <span className="dash-sidebar__user-name">
+              {user.name || user.email}
+            </span>
+          </button>
           <a className="dash-sidebar__editor" href="/" title="Back to editor">
             Editor
           </a>
@@ -645,7 +712,11 @@ const Dashboard = ({
               placeholder="Quick search"
               aria-label="Search scenes"
               value={query}
-              disabled={view.kind === "mentions" || view.kind === "members"}
+              disabled={
+                view.kind === "mentions" ||
+                view.kind === "members" ||
+                view.kind === "settings"
+              }
               onChange={(event) => setQuery(event.target.value)}
             />
             <kbd>
@@ -672,6 +743,20 @@ const Dashboard = ({
             >
               <Icon d={ICONS.at} /> Mentions
             </button>
+            <button
+              className={clsx({ active: view.kind === "settings" })}
+              onClick={() => goToView({ kind: "settings", tab: "profile" })}
+            >
+              <Icon d={ICONS.user} /> Profile settings
+              {unreadNotifications > 0 && (
+                <span
+                  className="dash-count"
+                  title={`${unreadNotifications} unread notifications`}
+                >
+                  {unreadNotifications}
+                </span>
+              )}
+            </button>
             {team && (
               <button
                 className={clsx({ active: view.kind === "members" })}
@@ -690,7 +775,10 @@ const Dashboard = ({
               <button
                 className={clsx("dash-item", {
                   active:
-                    !team && view.kind !== "shared" && view.kind !== "mentions",
+                    !team &&
+                    view.kind !== "shared" &&
+                    view.kind !== "mentions" &&
+                    view.kind !== "settings",
                   "is-drop": dropKey === "ws:personal",
                 })}
                 onClick={() => goToWorkspace(null)}
@@ -706,7 +794,8 @@ const Dashboard = ({
                     active:
                       teamId === t.id &&
                       view.kind !== "shared" &&
-                      view.kind !== "mentions",
+                      view.kind !== "mentions" &&
+                      view.kind !== "settings",
                     "is-drop": dropKey === `ws:${t.id}`,
                   })}
                   onClick={() => goToWorkspace(t.id)}
@@ -852,8 +941,12 @@ const Dashboard = ({
             <h1>
               <Icon
                 d={
-                  view.kind === "shared"
+                  view.kind === "settings"
+                    ? ICONS.user
+                    : view.kind === "shared"
                     ? ICONS.share
+                    : view.kind === "mentions"
+                    ? ICONS.at
                     : view.kind === "members"
                     ? ICONS.users
                     : currentFolder
@@ -900,10 +993,16 @@ const Dashboard = ({
           </div>
         )}
 
-        {view.kind === "mentions" ? (
+        {view.kind === "settings" ? (
           <div className="excalidraw dash-embed">
-            <MentionsPanel user={user} />
+            <SettingsPage
+              user={user}
+              tab={view.tab}
+              onTabChange={(tab) => setView({ kind: "settings", tab })}
+            />
           </div>
+        ) : view.kind === "mentions" ? (
+          <MentionsPanel user={user} />
         ) : view.kind === "members" && team ? (
           <div className={clsx("excalidraw dash-embed", `theme--${theme}`)}>
             <TeamPanel

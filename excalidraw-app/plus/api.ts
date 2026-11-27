@@ -153,6 +153,8 @@ export type Person = {
 
 export type MentionInboxItem = PlusComment & {
   sceneName: string;
+  /** The scene's preview image; `null` if there is none yet. */
+  sceneThumbnailAt?: number | null;
   unread: boolean;
 };
 

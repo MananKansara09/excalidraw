@@ -195,7 +195,7 @@ export const PlusTopRight = () => {
               "has-image": !!user.avatarUrl,
             })}
             onClick={() => setDialog({ name: "account" })}
-            title={`${user.name} — account settings`}
+            title={`${user.name} — profile settings`}
             aria-label="Account settings"
           >
             <AvatarContent name={user.name} avatarUrl={user.avatarUrl} />

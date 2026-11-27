@@ -96,6 +96,24 @@
     padding: 1rem;
   }
 
+  &__profile {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    padding: 0.2rem;
+    border: none;
+    border-radius: 8px;
+    background: none;
+    text-align: left;
+    cursor: pointer;
+
+    &:hover {
+      background: var(--dash-hover);
+    }
+  }
+
   &__user-name {
     flex: 1;
     font-weight: 600;
@@ -593,6 +611,185 @@
   }
 }
 
+// mentions: a card per scene, its mentions listed under the preview ----------
+
+.dash-grid--mentions {
+  grid-template-columns: repeat(auto-fill, minmax(min(19rem, 100%), 1fr));
+  // an expanded card shouldn't stretch its neighbours
+  align-items: start;
+}
+
+.dash-mention-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--dash-border);
+  border-radius: 14px;
+  background: var(--dash-panel);
+  transition: border-color 0.15s, box-shadow 0.15s;
+
+  &:hover {
+    border-color: var(--dash-primary);
+    box-shadow: var(--dash-shadow);
+  }
+
+  &.is-unread {
+    border-color: var(--dash-primary);
+  }
+
+  &__preview {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border: none;
+    border-bottom: 1px solid var(--dash-border);
+    background: radial-gradient(
+      circle at 30% 20%,
+      var(--dash-primary-soft),
+      transparent 70%
+    );
+    cursor: pointer;
+
+    .dash-card__thumb {
+      border-radius: 0;
+    }
+  }
+
+  &__new {
+    position: absolute;
+    top: 0.6rem;
+    right: 0.6rem;
+    padding: 0.2rem 0.55rem;
+    border-radius: 999px;
+    background: var(--dash-primary);
+    color: var(--dash-primary-text);
+    font-size: 0.72rem;
+    font-weight: 700;
+  }
+
+  &__title {
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
+    padding: 0.7rem 0.85rem 0.45rem;
+
+    .dash-card__sub {
+      flex: none;
+    }
+  }
+
+  &__list {
+    list-style: none;
+    margin: 0;
+    padding: 0 0.4rem 0.4rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    max-height: 18rem;
+    overflow-y: auto;
+  }
+
+  &__more {
+    padding: 0.55rem;
+    border: none;
+    border-top: 1px solid var(--dash-border);
+    background: none;
+    font-size: 0.8rem;
+    cursor: pointer;
+
+    // beats the `.dash button` color reset
+    .dash & {
+      color: var(--dash-primary);
+    }
+
+    &:hover {
+      background: var(--dash-hover);
+    }
+  }
+}
+
+.dash-mention {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.5rem 0.55rem;
+  border: none;
+  border-radius: 10px;
+  background: var(--dash-bg);
+  text-align: left;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--dash-hover);
+  }
+
+  &.is-unread {
+    box-shadow: inset 3px 0 0 var(--dash-primary);
+  }
+
+  &__avatar {
+    width: 1.75rem;
+    height: 1.75rem;
+    font-size: 0.8rem;
+  }
+
+  &__content {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+
+  &__meta {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+
+    strong {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    span {
+      flex: none;
+      font-size: 0.75rem;
+      color: var(--dash-muted);
+    }
+  }
+
+  &__body {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    font-size: 0.88rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .plus-mention {
+    color: var(--dash-primary);
+    font-weight: 600;
+
+    &.me {
+      padding: 0 0.2rem;
+      border-radius: 4px;
+      background: var(--dash-primary-soft);
+      color: var(--dash-text);
+    }
+  }
+}
+
 @keyframes dash-pulse {
   50% {
     opacity: 0.55;
@@ -610,6 +807,75 @@
 .dash-embed {
   max-width: 48rem;
   background: transparent !important;
+}
+
+.dash-count {
+  margin-left: auto;
+  min-width: 1.25rem;
+  padding: 0 0.35rem;
+  border-radius: 999px;
+  background: var(--dash-primary);
+  color: var(--dash-primary-text);
+  font-size: 0.7rem;
+  font-weight: 600;
+  line-height: 1.25rem;
+  text-align: center;
+}
+
+.dash-settings {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  gap: 1.25rem;
+
+  &__tabs {
+    display: flex;
+    gap: 0.25rem;
+    border-bottom: 1px solid var(--dash-border);
+    overflow-x: auto;
+
+    button {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.5rem 0.75rem;
+      border: none;
+      border-bottom: 2px solid transparent;
+      background: none;
+      white-space: nowrap;
+      cursor: pointer;
+
+      &.active {
+        border-bottom-color: var(--dash-primary);
+        color: var(--dash-primary);
+        font-weight: 600;
+      }
+    }
+  }
+
+  .plus-section {
+    padding: 1.25rem;
+    border: 1px solid var(--dash-border);
+    border-radius: 12px;
+    background: var(--dash-panel);
+
+    input {
+      border: 1px solid var(--dash-border);
+    }
+  }
+
+  &__log {
+    border: 1px solid var(--dash-border);
+    border-radius: 12px;
+    background: var(--dash-panel);
+    overflow: hidden;
+  }
+
+  // the bell's popover list, here a full page log
+  &__log .NotificationCenter.NotificationCenter {
+    width: 100%;
+    max-height: none;
+  }
 }
 
 .dash-busy {

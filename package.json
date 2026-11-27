@@ -31,6 +31,7 @@
     "husky": "7.0.4",
     "jsdom": "22.1.0",
     "lint-staged": "12.3.7",
+    "nodemon": "3.1.14",
     "pepjs": "0.5.3",
     "playwright": "1.58.2",
     "prettier": "2.6.2",
@@ -97,6 +98,9 @@
     "start:plus-server": "yarn --cwd ./plus-server start",
     "install:claude-bridge": "yarn --cwd ./claude-bridge install",
     "start:claude-bridge": "yarn --cwd ./claude-bridge start",
+    "dev:frontend": "yarn --cwd ./excalidraw-app vite",
+    "dev:claude-bridge": "nodemon --watch claude-bridge --ext mjs,js,json --ignore claude-bridge/node_modules --exec node claude-bridge/server.mjs",
+    "dev:plus-server": "nodemon --watch plus-server/src --ext ts,js,json --exec node plus-server/src/index.ts",
     "test:plus-server": "yarn --cwd ./plus-server test"
   },
   "resolutions": {

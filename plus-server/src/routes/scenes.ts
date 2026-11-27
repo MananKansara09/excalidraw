@@ -1026,9 +1026,16 @@ export const registerSceneRoutes = (router: Router, ctx: AppContext) => {
   /** Comments that mention the caller, newest first, with an unread count. */
   router.get("/api/v1/me/mentions", (req) => {
     const user = requireUser(db, req);
-    const rows = all<CommentRow & { scene_name: string; seen_at: number }>(
+    const rows = all<
+      CommentRow & {
+        scene_name: string;
+        scene_thumbnail_at: number | null;
+        seen_at: number;
+      }
+    >(
       db,
-      `SELECT comments.*, users.name AS author_name, users.avatar_url AS author_avatar_url, scenes.name AS scene_name
+      `SELECT comments.*, users.name AS author_name, users.avatar_url AS author_avatar_url, scenes.name AS scene_name,
+         CASE WHEN scenes.thumbnail IS NOT NULL THEN scenes.thumbnail_at END AS scene_thumbnail_at
        FROM comments
        JOIN users ON users.id = comments.author_id
        JOIN scenes ON scenes.id = comments.scene_id
@@ -1058,6 +1065,7 @@ export const registerSceneRoutes = (router: Router, ctx: AppContext) => {
       mentions: visible.map((row) => ({
         ...commentJSON(row),
         sceneName: row.scene_name,
+        sceneThumbnailAt: row.scene_thumbnail_at,
         unread: row.created_at > seenAt,
       })),
     };

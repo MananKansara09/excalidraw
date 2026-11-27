@@ -35,12 +35,50 @@ const MAX_FILES = 5;
 const ACCEPT =
   ".pdf,.png,.jpg,.jpeg,.webp,.gif,.txt,.md,.markdown,.csv,.tsv,.json,.xml,.yaml,.yml,.html,.css,.js,.ts,.tsx,.py,.sql,.mmd,.log";
 
+/** starter diagrams on the empty chat */
 const SUGGESTIONS = [
-  "Draw a microservices architecture with an API gateway, 3 services and a database",
-  "Create a flowchart for a user login with 2FA",
-  "Sketch a mind map about launching a product",
-  "Make an ER diagram for a blog (users, posts, comments)",
+  {
+    title: "Flowchart",
+    hint: "Steps and decisions",
+    icon: "M8 3h8v5H8zM12 8v4M12 12l5 4.5-5 4.5-5-4.5z",
+    prompt: "Create a flowchart for a user login with 2FA",
+  },
+  {
+    title: "Architecture",
+    hint: "Services and data",
+    icon: "M9 3h6v5H9zM3 16h6v5H3zM15 16h6v5h-6zM12 8v4M6 16v-4h12v4",
+    prompt:
+      "Draw a microservices architecture with an API gateway, 3 services and a database",
+  },
+  {
+    title: "Bar chart",
+    hint: "Compare values",
+    icon: "M4 4v16h16M8 16v-5M12.5 16V8M17 16v-3",
+    prompt:
+      "Draw a bar chart comparing quarterly revenue (sample data), with labelled axes",
+  },
+  {
+    title: "Mind map",
+    hint: "Branch out ideas",
+    icon: "M9 12h6M9 12 5 6M9 12l-4 6M15 12l4-6M15 12l4 6",
+    prompt: "Sketch a mind map about launching a product",
+  },
+  {
+    title: "ER diagram",
+    hint: "Tables and relations",
+    icon: "M3 5h7v14H3zM14 5h7v14h-7zM3 10h7M14 10h7M10 14h4",
+    prompt: "Make an ER diagram for a blog (users, posts, comments)",
+  },
+  {
+    title: "Timeline",
+    hint: "Roadmap and phases",
+    icon: "M3 12h18M7 12V7M12 12v5M17 12V7",
+    prompt: "Draw a product roadmap timeline with four quarters and milestones",
+  },
 ];
+
+/** one-tap refinements offered under a finished drawing */
+const FOLLOW_UPS = ["Tidy up the layout", "Add colour coding", "Add labels"];
 
 const TOOL_LABELS: Record<string, string> = {
   add_elements: "Drawing",
@@ -86,6 +124,28 @@ const ICON = {
   plus: "M12 5v14M5 12h14",
   send: "M12 19V5M5 12l7-7 7 7",
   stop: "M7 7h10v10H7z",
+  wider: "M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7",
+  narrower: "M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7",
+  signOut: "M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9",
+  down: "M12 5v14M5 12l7 7 7-7",
+  copy: "M9 9h11v11H9zM5 15H4V4h11v1",
+  check: "m5 12 5 5 9-10",
+  fit: "M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5",
+  rewind: "M4 4v6h6M4.5 10a8 8 0 1 1 .5 6",
+};
+
+/**
+ * The editor listens for keys on the whole document, so anything pressed while
+ * in the chat must stay in the chat. Ctrl/Cmd shortcuts still reach the canvas
+ * (e.g. undoing a restore) unless a text field is focused.
+ */
+const keepKeysInChat = (e: React.KeyboardEvent) => {
+  const typing =
+    e.target instanceof HTMLInputElement ||
+    e.target instanceof HTMLTextAreaElement;
+  if (typing || !(e.ctrlKey || e.metaKey)) {
+    e.stopPropagation();
+  }
 };
 
 const readFileAsBase64 = (file: File): Promise<string> =>
@@ -177,9 +237,7 @@ const ConnectCard = ({ onConnected }: { onConnected: () => void }) => {
 
   return (
     <div className="claude-connect">
-      <div className="claude-empty-logo">
-        <ClaudeMark size={26} />
-      </div>
+      <ClaudeMark size={36} />
       <h3>Connect your Claude account</h3>
       <p>
         Claude uses <b>your own</b> Claude subscription. You only do this once.
@@ -199,6 +257,7 @@ const ConnectCard = ({ onConnected }: { onConnected: () => void }) => {
           <li>Copy the code it shows and paste it here:</li>
           <li>
             <input
+              className="claude-field"
               value={code}
               placeholder="Paste code…"
               autoFocus
@@ -220,8 +279,10 @@ const ConnectCard = ({ onConnected }: { onConnected: () => void }) => {
   );
 };
 
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
 /** one step of Claude's work: "Drawing · 12 elements", with its outcome */
-const ToolCard = ({
+const ToolStep = ({
   name,
   call,
   live,
@@ -233,31 +294,92 @@ const ToolCard = ({
   const label = TOOL_LABELS[name] || name.replace(/^mcp__\w+__/, "");
   const status = call?.status ?? (live ? "running" : "done");
   const running = live && status === "running";
-  const detail =
-    call?.count !== undefined
-      ? `${call.count} element${call.count === 1 ? "" : "s"}`
-      : null;
   return (
-    <div className={clsx("claude-step", status)}>
-      {running ? (
-        <Spinner />
-      ) : (
-        <span className="claude-step-icon" aria-hidden>
-          {status === "error" ? "✕" : "✓"}
-        </span>
-      )}
+    <li className={clsx("claude-step", status)}>
+      <span className="claude-step-node" aria-hidden>
+        {running ? <Spinner /> : status === "error" ? "✕" : "✓"}
+      </span>
       <span
         className={clsx("claude-step-label", { "claude-shimmer": running })}
       >
         {running ? `${label}…` : label}
       </span>
-      {detail && <span className="claude-step-chip">{detail}</span>}
+      {call?.count !== undefined && (
+        <span className="claude-step-chip">
+          {plural(call.count, "element")}
+        </span>
+      )}
       {call?.durationMs !== undefined && !running && (
         <span className="claude-step-time">
           {(call.durationMs / 1000).toFixed(1)}s
         </span>
       )}
+    </li>
+  );
+};
+
+/** the canvas work of one reply as a timeline; long finished runs fold away */
+const Activity = ({ message, live }: { message: Message; live: boolean }) => {
+  const [toggled, setToggled] = useState<boolean | null>(null);
+  const working = live && !message.text;
+  const expanded = toggled ?? (working || message.tools.length <= 3);
+  const elements = (message.toolCalls ?? []).reduce(
+    (sum, c) => sum + (c.count ?? 0),
+    0,
+  );
+  return (
+    <div className="claude-activity">
+      <button
+        type="button"
+        className="claude-activity-head"
+        aria-expanded={expanded}
+        onClick={() => setToggled(!expanded)}
+      >
+        <span className={clsx({ "claude-shimmer": working })}>
+          {working
+            ? "Working on the canvas"
+            : plural(message.tools.length, "step")}
+        </span>
+        {elements > 0 && (
+          <span className="claude-activity-total">
+            {plural(elements, "element")}
+          </span>
+        )}
+        <span className={clsx("claude-caret", { open: expanded })}>›</span>
+      </button>
+      {expanded && (
+        <ol className="claude-timeline">
+          {message.tools.map((name, j) => (
+            <ToolStep
+              key={j}
+              name={name}
+              call={message.toolCalls?.[j]}
+              live={working && j === message.tools.length - 1}
+            />
+          ))}
+        </ol>
+      )}
     </div>
+  );
+};
+
+const CopyButton = ({ text }: { text: string }) => {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      title="Copy reply"
+      aria-label="Copy reply"
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(text);
+          setCopied(true);
+          window.setTimeout(() => setCopied(false), 1500);
+        } catch {}
+      }}
+    >
+      <Icon d={copied ? ICON.check : ICON.copy} />
+    </button>
   );
 };
 
@@ -328,6 +450,9 @@ export const ClaudePanel = ({
   /** the canvas as it was before each prompt, so any prompt can be rewound */
   const checkpoints = useRef(new Map<number, OrderedExcalidrawElement[]>());
   const scrollRef = useRef<HTMLDivElement>(null);
+  /** follow new output, until the reader scrolls up */
+  const stickRef = useRef(true);
+  const [atBottom, setAtBottom] = useState(true);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -362,12 +487,35 @@ export const ClaudePanel = ({
     };
   }, [status]);
 
-  useEffect(() => {
+  const scrollToLatest = useCallback(() => {
+    stickRef.current = true;
+    setAtBottom(true);
     scrollRef.current?.scrollTo({
       top: scrollRef.current.scrollHeight,
       behavior: "smooth",
     });
-  }, [messages, logs, view, open]);
+  }, []);
+
+  // history and empty states read from the top; chat and logs follow along
+  const hasFeed =
+    view === "logs" ? logs.length > 0 : view === "chat" && messages.length > 0;
+  useEffect(() => {
+    if (!hasFeed) {
+      scrollRef.current?.scrollTo({ top: 0 });
+      setAtBottom(true);
+    } else if (stickRef.current) {
+      scrollToLatest();
+    }
+  }, [messages, logs, view, open, mode, hasFeed, scrollToLatest]);
+
+  const onScroll = () => {
+    const el = scrollRef.current;
+    if (el && hasFeed) {
+      const near = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+      stickRef.current = near;
+      setAtBottom(near);
+    }
+  };
 
   // close the "⋯" menu on any outside click
   useEffect(() => {
@@ -385,6 +533,27 @@ export const ClaudePanel = ({
     }
   }, [open, mode]);
 
+  // the composer grows with its text: one line at rest, capped by max-height in CSS
+  useEffect(() => {
+    const el = inputRef.current;
+    if (el) {
+      el.style.height = "auto";
+      el.style.height = `${el.scrollHeight}px`;
+    }
+  }, [input, open, mode]);
+
+  const fitDrawing = useCallback(() => {
+    const elements = excalidrawAPI.getSceneElements();
+    if (elements.length) {
+      excalidrawAPI.setViewport({
+        target: elements,
+        fit: "scale-down",
+        animation: { duration: 300 },
+        offsets: { ui: true },
+      });
+    }
+  }, [excalidrawAPI]);
+
   // after the side panel opens/closes/resizes, bring the drawing back in view
   const panelShown = open && mode === "panel";
   const isFirstLayout = useRef(true);
@@ -393,19 +562,9 @@ export const ClaudePanel = ({
       isFirstLayout.current = false;
       return;
     }
-    const id = window.setTimeout(() => {
-      const elements = excalidrawAPI.getSceneElements();
-      if (elements.length) {
-        excalidrawAPI.setViewport({
-          target: elements,
-          fit: "scale-down",
-          animation: { duration: 300 },
-          offsets: { ui: true },
-        });
-      }
-    }, 300);
+    const id = window.setTimeout(fitDrawing, 300);
     return () => window.clearTimeout(id);
-  }, [panelShown, wide, excalidrawAPI]);
+  }, [panelShown, wide, fitDrawing]);
 
   // keep this chat in the saved history
   useEffect(() => {
@@ -510,6 +669,9 @@ export const ClaudePanel = ({
       updatePrefs({ open: true, mode: "panel" });
       return;
     }
+    stickRef.current = true;
+    // a clicked suggestion disappears; don't let focus fall back to the page
+    inputRef.current?.focus();
     const sent = files;
     const userId = nextId.current++;
     setFocusId(null);
@@ -703,6 +865,7 @@ export const ClaudePanel = ({
   const openChat = (chat: Chat) => {
     stop();
     checkpoints.current.clear();
+    stickRef.current = true;
     setFocusId(null);
     setMenuOpen(false);
     sessionId.current = chat.sessionId;
@@ -891,7 +1054,10 @@ export const ClaudePanel = ({
   };
 
   return (
-    <div className={clsx("claude-root", `theme-${theme}`)}>
+    <div
+      className={clsx("claude-root", `theme-${theme}`)}
+      onKeyDown={keepKeysInChat}
+    >
       <input
         ref={fileInput}
         type="file"
@@ -922,6 +1088,8 @@ export const ClaudePanel = ({
           className={clsx("claude-bar", { dragging })}
           role="dialog"
           aria-label="Claude"
+          // clicks on plain areas focus the chat, not the canvas
+          tabIndex={-1}
           {...dropProps}
         >
           {ready && dots.length > 0 && (
@@ -1071,11 +1239,11 @@ export const ClaudePanel = ({
           >
             {mark()}
             <input
+              className="claude-field"
               value={input}
               placeholder="Ask Claude to draw or edit…"
               aria-label="Message Claude"
               onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.stopPropagation()}
             />
             {attachButton}
             <button
@@ -1102,10 +1270,14 @@ export const ClaudePanel = ({
       )}
 
       {open && mode === "panel" && (
-        <aside
+        // not an <aside>: the editor hides those on phones
+        <div
           className={clsx("claude-panel", { wide, dragging })}
           // lets the editor keep fitted content clear of the docked panel
           data-viewport-ui="side"
+          role="complementary"
+          // clicks on plain areas focus the chat, not the canvas
+          tabIndex={-1}
           aria-label="Claude chat"
           {...dropProps}
         >
@@ -1142,16 +1314,12 @@ export const ClaudePanel = ({
                 <Icon d={ICON.plus} />
               </button>
               <button
+                className="claude-wide-toggle"
                 title={wide ? "Narrower" : "Wider"}
+                aria-label={wide ? "Narrower" : "Wider"}
                 onClick={() => updatePrefs({ wide: !wide })}
               >
-                <Icon
-                  d={
-                    wide
-                      ? "M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"
-                      : "M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"
-                  }
-                />
+                <Icon d={wide ? ICON.narrower : ICON.wider} />
               </button>
               <button
                 title="Switch to the bottom chat"
@@ -1163,9 +1331,10 @@ export const ClaudePanel = ({
               {ready && (
                 <button
                   title="Disconnect Claude account"
+                  aria-label="Disconnect Claude account"
                   onClick={signOutOfClaude}
                 >
-                  <Icon d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" />
+                  <Icon d={ICON.signOut} />
                 </button>
               )}
               <button
@@ -1195,7 +1364,7 @@ export const ClaudePanel = ({
             ))}
           </nav>
 
-          <div className="claude-messages" ref={scrollRef}>
+          <div className="claude-messages" ref={scrollRef} onScroll={onScroll}>
             {view === "history" ? (
               <HistoryView
                 chats={ownChats}
@@ -1221,9 +1390,7 @@ export const ClaudePanel = ({
                 )}
                 {status?.state === "signin_required" && (
                   <div className="claude-connect">
-                    <div className="claude-empty-logo">
-                      <ClaudeMark size={26} />
-                    </div>
+                    <ClaudeMark size={36} />
                     <h3>Sign in to use Claude</h3>
                     <p>
                       Sign in to your account first, then connect your Claude
@@ -1244,18 +1411,24 @@ export const ClaudePanel = ({
                 )}
                 {ready && !messages.length && (
                   <div className="claude-empty">
-                    <div className="claude-empty-logo">
-                      <ClaudeMark size={26} />
-                    </div>
+                    <ClaudeMark size={36} />
                     <h3>What shall we draw?</h3>
                     <p>
-                      Describe a diagram or scene, or attach a document, and
-                      I'll build it on the canvas.
+                      Describe it, or attach a document, and I'll build it on
+                      the canvas.
                     </p>
                     <div className="claude-suggestions">
                       {SUGGESTIONS.map((s) => (
-                        <button key={s} onClick={() => send(s)} disabled={busy}>
-                          {s}
+                        <button
+                          key={s.title}
+                          type="button"
+                          title={s.prompt}
+                          onClick={() => send(s.prompt)}
+                          disabled={busy}
+                        >
+                          <Icon d={s.icon} />
+                          <strong>{s.title}</strong>
+                          <small>{s.hint}</small>
                         </button>
                       ))}
                     </div>
@@ -1284,7 +1457,8 @@ export const ClaudePanel = ({
                             title="Restore the canvas to how it was before this prompt"
                             onClick={() => restoreCheckpoint(m.id)}
                           >
-                            ↺ Restore checkpoint
+                            <Icon d={ICON.rewind} />
+                            Restore checkpoint
                           </button>
                         )}
                       </div>
@@ -1300,35 +1474,39 @@ export const ClaudePanel = ({
                       {m.thinking && (
                         <ThinkingBlock message={m} live={thinkingLive} />
                       )}
-                      {m.tools.map((t, j) => {
-                        const toolLive =
-                          live && j === m.tools.length - 1 && !m.text;
-                        return (
-                          <ToolCard
-                            key={j}
-                            name={t}
-                            call={m.toolCalls?.[j]}
-                            live={toolLive}
-                          />
-                        );
-                      })}
-                      {m.text && (
-                        <div className="claude-reply">
-                          <span className="claude-dot">●</span>
-                          {m.error ? (
-                            <div className="claude-reply-text">{m.text}</div>
-                          ) : (
-                            <Markdown
-                              className="claude-reply-text"
-                              text={m.text}
-                            />
-                          )}
-                        </div>
+                      {m.tools.length > 0 && (
+                        <Activity message={m} live={live} />
                       )}
+                      {m.text &&
+                        (m.error ? (
+                          <div className="claude-reply-text" role="alert">
+                            {m.text}
+                          </div>
+                        ) : (
+                          <Markdown
+                            className="claude-reply-text"
+                            text={m.text}
+                          />
+                        ))}
                       {live && !m.text && !m.tools.length && !thinkingLive && (
-                        <div className="claude-tool">
+                        <div className="claude-working">
                           <Spinner />
                           <span className="claude-shimmer">Thinking…</span>
+                        </div>
+                      )}
+                      {!live && m.text && !m.error && (
+                        <div className="claude-msg-actions">
+                          <CopyButton text={m.text} />
+                          {m.tools.length > 0 && (
+                            <button
+                              type="button"
+                              title="Show the drawing"
+                              aria-label="Show the drawing"
+                              onClick={fitDrawing}
+                            >
+                              <Icon d={ICON.fit} />
+                            </button>
+                          )}
                         </div>
                       )}
                     </div>
@@ -1338,41 +1516,67 @@ export const ClaudePanel = ({
             )}
           </div>
 
-          {fileChips}
-          <form
-            className="claude-composer"
-            onSubmit={(e) => {
-              e.preventDefault();
-              send(input);
-            }}
-          >
-            {attachButton}
-            <textarea
-              ref={inputRef}
-              value={input}
-              rows={1}
-              disabled={!ready}
-              placeholder={
-                ready
-                  ? "Ask Claude to draw or edit…"
-                  : "Connect Claude to start…"
-              }
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                e.stopPropagation();
-                if (
-                  e.key === "Enter" &&
-                  !e.shiftKey &&
-                  !e.nativeEvent.isComposing
-                ) {
-                  e.preventDefault();
-                  send(input);
-                }
+          <footer className="claude-dock">
+            {!atBottom && view !== "history" && (
+              <button
+                type="button"
+                className="claude-latest"
+                onClick={scrollToLatest}
+              >
+                <Icon d={ICON.down} />
+                Latest
+              </button>
+            )}
+            {ready &&
+              view === "chat" &&
+              !busy &&
+              !input &&
+              !!messages[messages.length - 1]?.tools.length && (
+                <div className="claude-followups">
+                  {FOLLOW_UPS.map((f) => (
+                    <button key={f} type="button" onClick={() => send(f)}>
+                      {f}
+                    </button>
+                  ))}
+                </div>
+              )}
+            {fileChips}
+            <form
+              className="claude-composer"
+              onSubmit={(e) => {
+                e.preventDefault();
+                send(input);
               }}
-            />
-            {sendButton}
-          </form>
-        </aside>
+            >
+              {attachButton}
+              <textarea
+                ref={inputRef}
+                className="claude-field"
+                value={input}
+                rows={1}
+                // never disabled: keys typed at a dead field would hit the canvas
+                aria-label="Message Claude"
+                placeholder={
+                  ready
+                    ? "Ask Claude to draw or edit…"
+                    : "Connect Claude to start…"
+                }
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (
+                    e.key === "Enter" &&
+                    !e.shiftKey &&
+                    !e.nativeEvent.isComposing
+                  ) {
+                    e.preventDefault();
+                    send(input);
+                  }
+                }}
+              />
+              {sendButton}
+            </form>
+          </footer>
+        </div>
       )}
     </div>
   );

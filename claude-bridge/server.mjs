@@ -46,7 +46,7 @@ const CLAUDE_BIN = process.env.CLAUDE_BIN || "";
 const MAX_CONCURRENT = Number(process.env.CLAUDE_BRIDGE_MAX_CONCURRENT || 8);
 const ALLOWED_ORIGINS = (
   process.env.CLAUDE_BRIDGE_ORIGINS ||
-  "http://localhost:3000,http://127.0.0.1:3000"
+  "http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001"
 )
   .split(",")
   .map((s) => s.trim());

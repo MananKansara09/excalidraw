@@ -85,7 +85,7 @@ server.listen(port, () => {
   );
   if (!env.ANTHROPIC_API_KEY && !env.ANTHROPIC_AUTH_TOKEN) {
     console.log(
-      "  AI: no server key; users can add their own in Account settings",
+      "  AI: no server key; users can add their own in Profile settings",
     );
   }
 });

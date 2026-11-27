@@ -39,7 +39,7 @@ const MIME: Record<string, string> = {
 const API_INDEX = {
   name: "Excalidraw Plus API",
   version: "v1",
-  auth: "Send `Authorization: Bearer <api key>` (create keys in Account settings), or use the web session cookie.",
+  auth: "Send `Authorization: Bearer <api key>` (create keys in Profile settings), or use the web session cookie.",
   endpoints: [
     "POST /api/v1/auth/signup | /login | /logout",
     "GET|PATCH /api/v1/me",

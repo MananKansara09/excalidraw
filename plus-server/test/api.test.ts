@@ -1595,6 +1595,7 @@ describe("mentions", () => {
     let inbox = (await grace.get("/api/v1/me/mentions")).json;
     assert.equal(inbox.unread, 1);
     assert.equal(inbox.mentions[0].sceneName, "Mentions");
+    assert.equal(inbox.mentions[0].sceneThumbnailAt, null);
     assert.equal(inbox.mentions[0].body, comment.body);
     await grace.post("/api/v1/me/mentions/seen");
     inbox = (await grace.get("/api/v1/me/mentions")).json;

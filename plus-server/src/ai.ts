@@ -151,7 +151,7 @@ const streamToClient = async (
   if (!quota.apiKey && !ctx.ai.isConfigured()) {
     throw new HttpError(
       503,
-      "AI isn't set up on this server. Add your own Anthropic API key in Account settings.",
+      "AI isn't set up on this server. Add your own Anthropic API key in Profile settings.",
     );
   }
   if (quota.limit !== null && quota.used >= quota.limit) {
@@ -197,7 +197,7 @@ const streamToClient = async (
       message = error.message;
     } else if (error instanceof Anthropic.AuthenticationError) {
       message = quota.apiKey
-        ? "Your Anthropic API key was rejected. Check it in Account settings."
+        ? "Your Anthropic API key was rejected. Check it in Profile settings."
         : "The server's AI key was rejected.";
     } else if (error instanceof Anthropic.RateLimitError) {
       message = "The AI service is busy. Try again in a minute.";
