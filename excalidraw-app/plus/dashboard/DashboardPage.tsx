@@ -679,7 +679,11 @@ const Dashboard = ({
   const canCreate = view.kind === "scenes";
 
   return (
-    <div className="dash__layout">
+    <div
+      className={clsx("dash__layout", {
+        "is-settings": view.kind === "settings",
+      })}
+    >
       <aside className="dash-sidebar">
         <div className="dash-sidebar__user">
           <button

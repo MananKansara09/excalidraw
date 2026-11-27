@@ -807,6 +807,12 @@
 .dash-embed {
   max-width: 48rem;
   background: transparent !important;
+
+  // `.excalidraw` fills the editor and clips: here the page scrolls instead
+  &.excalidraw {
+    height: auto;
+    overflow: visible;
+  }
 }
 
 .dash-count {
@@ -829,6 +835,11 @@
   gap: 1.25rem;
 
   &__tabs {
+    position: sticky;
+    // flush with the top of `.dash-main`, over its padding
+    top: -2rem;
+    z-index: 5;
+    background: var(--dash-bg);
     display: flex;
     gap: 0.25rem;
     border-bottom: 1px solid var(--dash-border);
@@ -875,6 +886,38 @@
   &__log .NotificationCenter.NotificationCenter {
     width: 100%;
     max-height: none;
+  }
+}
+
+// narrow screens: the sidebar shrinks to a top bar, so settings aren't
+// pushed below it
+@media (max-width: 760px) {
+  .dash__layout.is-settings {
+    grid-template-columns: minmax(0, 1fr);
+
+    .dash-sidebar {
+      min-width: 0;
+    }
+
+    .dash-sidebar__scroll {
+      flex: none;
+    }
+
+    .dash-search,
+    .dash-section,
+    .dash-list {
+      display: none;
+    }
+
+    .dash-nav {
+      flex-direction: row;
+      flex-wrap: wrap;
+      margin: 0;
+    }
+
+    .dash-count {
+      margin-left: 0;
+    }
   }
 }
 
