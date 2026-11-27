@@ -103,13 +103,17 @@ Use two browsers, or one normal and one private window:
 
 ## Claude chat
 
-The in-app **Claude** panel lets people create diagrams by chatting. It is powered by the `claude-bridge` service in the same compose file (it starts with everything else, no extra step beyond `CLAUDE_BRIDGE_SECRET`).
+The in-app **Claude**, **Codex** and **Antigravity** panels let people create diagrams by chatting. All three are powered by the `claude-bridge` service in the same compose file (it starts with everything else, no extra step beyond `CLAUDE_BRIDGE_SECRET`).
 
-- **Each user signs in to their own Claude account**, from the panel: _Sign in with Claude_, approve on claude.ai, paste the code back. Their login is stored in a private per-user directory on the `claude-data` volume, so usage counts against their own plan. There is no shared Claude account or key.
+- **Each user signs in to their own accounts**, from the panel. Sign-ins are stored in a private per-user directory on the `claude-data` volume, so usage counts against that person's own plan. There is no shared account or key.
+  - Claude: _Sign in with Claude_, approve on claude.ai, paste the code back.
+  - Codex: _Sign in with ChatGPT_, then enter the one-time code on the page that opens. Device code sign-in must be allowed in the user's ChatGPT security settings.
+  - Antigravity: _Sign in with Antigravity_, approve with Google, paste the code back. Signing out deletes that user's Antigravity conversations on the server.
 - Users must be signed in to your Excalidraw Plus account first; the Plus server passes the user's identity to the bridge. The bridge isn't published on any port.
-- Claude gets no file or shell access, only tools that draw on the canvas.
+- The agents get no file or shell access, only tools that draw on the canvas.
+- Check that each provider's terms allow its subscription sign-in on a server you run.
 - Back up `claude-data` if you don't want users to reconnect after a rebuild. Users can disconnect from the panel (door icon).
-- `docker compose ... logs claude-bridge` shows problems; `CLAUDE_BRIDGE_MAX_CONCURRENT` limits simultaneous chats.
+- `docker compose ... logs claude-bridge` shows problems; `CLAUDE_BRIDGE_MAX_CONCURRENT` limits simultaneous chats across all three.
 
 For local development (no Docker), see `claude-bridge/README.md`.
 

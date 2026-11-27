@@ -2107,12 +2107,10 @@ body.plus-presenting .excalidraw {
   }
 }
 
-// the Claude assistant isn't part of the editor, so it needs hiding too
-body.plus-presenting {
-  .claude-fab,
-  .claude-panel {
-    display: none !important;
-  }
+// the assistants (dock, bottom chat and side panel) aren't part of the editor,
+// so they need hiding too
+body.plus-presenting .claude-root {
+  display: none !important;
 }
 
 // cloud scenes list everyone (with call state) in the Plus top bar, so the

@@ -71,9 +71,10 @@ services:
     ports:
       - "127.0.0.1:${ROOM_PORT:-3002}:3002"
 
-  # Runs the Claude Agent SDK for the in-app Claude chat. Every Plus user signs
-  # in to their OWN Claude account from the UI; their login is kept in its own
-  # directory on the claude-data volume. Not published: only `plus` can reach it.
+  # Runs the agents behind the in-app assistants (Claude, Codex, Antigravity).
+  # Every Plus user signs in to their OWN accounts from the UI; each login is
+  # kept in that user's directory on the claude-data volume. Not published: only
+  # `plus` can reach it.
   claude-bridge:
     build:
       context: .

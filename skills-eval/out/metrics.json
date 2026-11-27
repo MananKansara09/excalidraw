@@ -1,0 +1,96 @@
+{
+ "with": {
+  "err": "Failed to fetch",
+  "elements": 266,
+  "shapes": 75,
+  "texts": 137,
+  "words": 992,
+  "arrows": 42,
+  "labelledArrows": 0,
+  "boundArrows": 12,
+  "frames": 12,
+  "shapeOverlap": 0,
+  "textClash": 0,
+  "arrowThrough": 3,
+  "spillOutsideFrame": 1,
+  "frameOverlap": 0,
+  "shapesTooSmallForLabel": 0,
+  "fillColours": [
+   "#a5d8ff",
+   "#ffec99",
+   "#d0bfff",
+   "#ffc9c9",
+   "#b2f2bb",
+   "#e9ecef"
+  ],
+  "fontSizes": [
+   16,
+   20,
+   22,
+   24,
+   28,
+   32,
+   36,
+   48
+  ],
+  "textUnder16": 0,
+  "dashed": 6,
+  "roughness": [
+   1,
+   0
+  ],
+  "size": [
+   5020,
+   3180
+  ]
+ },
+ "without": {
+  "err": "Failed to fetch",
+  "elements": 220,
+  "shapes": 68,
+  "texts": 103,
+  "words": 744,
+  "arrows": 35,
+  "labelledArrows": 8,
+  "boundArrows": 32,
+  "frames": 12,
+  "shapeOverlap": 0,
+  "textClash": 0,
+  "arrowThrough": 0,
+  "spillOutsideFrame": 0,
+  "frameOverlap": 0,
+  "shapesTooSmallForLabel": 0,
+  "fillColours": [
+   "#e9ecef",
+   "#a5d8ff",
+   "#d0bfff",
+   "#ffc9c9",
+   "#b2f2bb",
+   "#ffec99",
+   "#fff4e6"
+  ],
+  "fontSizes": [
+   16,
+   18,
+   20,
+   22,
+   24,
+   26,
+   28,
+   30,
+   32,
+   40,
+   44,
+   96
+  ],
+  "textUnder16": 0,
+  "dashed": 1,
+  "roughness": [
+   1
+  ],
+  "size": [
+   4140,
+   3270
+  ]
+ }
+}

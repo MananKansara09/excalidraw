@@ -196,7 +196,7 @@ const patchCall = (
 
 const oneLine = (text: string) => text.replace(/\s+/g, " ").trim();
 
-/** sign-in to the user's own Claude account: open the link, paste the code */
+/** sign-in to the user's own account: open the link, paste the code */
 const ConnectCard = ({
   agent,
   onConnected,
@@ -215,9 +215,10 @@ const ConnectCard = ({
     // open synchronously so the popup isn't blocked, point it once we have the URL
     const popup = window.open("", "_blank");
     try {
-      const authUrl = await startLogin(agent.base);
+      const { url: authUrl } = await startLogin(agent.base);
       setUrl(authUrl);
       if (popup) {
+        popup.opener = null;
         popup.location.href = authUrl;
       }
     } catch (e: any) {
@@ -247,19 +248,19 @@ const ConnectCard = ({
   return (
     <div className="claude-connect">
       <agent.Logo size={36} />
-      <h3>Connect your Claude account</h3>
+      <h3>Connect your {agent.name} account</h3>
       <p>
-        Claude uses <b>your own</b> Claude subscription. You only do this once.
+        {agent.name} uses <b>your own</b> subscription. You only do this once.
       </p>
       {!url ? (
         <button className="claude-primary" onClick={begin} disabled={busy}>
-          {busy ? "Starting…" : "Sign in with Claude"}
+          {busy ? "Starting…" : `Sign in with ${agent.name}`}
         </button>
       ) : (
         <ol className="claude-steps">
           <li>
             <a href={url} target="_blank" rel="noopener noreferrer">
-              Open the Claude sign-in page
+              Open the {agent.name} sign-in page
             </a>{" "}
             and approve access.
           </li>
@@ -289,7 +290,7 @@ const ConnectCard = ({
 };
 
 /**
- * Antigravity sign-in happens in its own CLI, on the bridge's machine: open a
+ * On your own computer, Antigravity signs in inside its own CLI: open a
  * terminal there, then watch for the login to appear.
  */
 const AntigravityConnectCard = ({
@@ -358,8 +359,9 @@ const AntigravityConnectCard = ({
 };
 
 /**
- * Codex signs in to ChatGPT in the browser, which hands the login straight back
- * to the bridge: open the page, then watch for the login to appear.
+ * Codex signs in to ChatGPT in the browser, which hands the login back to the
+ * bridge (on a shared one, after entering a one-time code there): open the
+ * page, then watch for the login to appear.
  */
 const CodexConnectCard = ({
   agent,
@@ -371,6 +373,7 @@ const CodexConnectCard = ({
   onCheck: () => void;
 }) => {
   const [url, setUrl] = useState<string | null>(null);
+  const [userCode, setUserCode] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -388,11 +391,12 @@ const CodexConnectCard = ({
     // open synchronously so the popup isn't blocked, point it once we have the URL
     const popup = window.open("", "_blank");
     try {
-      const authUrl = await startLogin(agent.base);
-      setUrl(authUrl);
+      const login = await startLogin(agent.base);
+      setUrl(login.url);
+      setUserCode(login.userCode);
       if (popup) {
         popup.opener = null;
-        popup.location.href = authUrl;
+        popup.location.href = login.url;
       }
     } catch (e: any) {
       popup?.close();
@@ -422,6 +426,11 @@ const CodexConnectCard = ({
               <a href={url} target="_blank" rel="noopener noreferrer">
                 Open the sign-in page
               </a>
+              {userCode && (
+                <p>
+                  Enter this code there: <code>{userCode}</code>
+                </p>
+              )}
               <p className="claude-shimmer">
                 Approve access in the browser. This updates on its own.
               </p>
@@ -622,7 +631,9 @@ export const ClaudePanel = ({
   const [status, setStatus] = useState<BridgeStatus | null>(null);
   const ready = status?.state === "ok" && status.loggedIn;
   const owner =
-    ready && status.state === "ok" ? status.email || agent.id : null;
+    ready && status.state === "ok"
+      ? status.email || status.user || agent.id
+      : null;
   const plan = status?.state === "ok" ? status.plan : null;
   const [models, setModels] = useState<ModelChoice[]>([]);
   // a saved choice this account doesn't offer falls back to the first
@@ -1160,8 +1171,11 @@ export const ClaudePanel = ({
     });
   };
 
+  /** Antigravity on this computer: signing in and out happens in its terminal */
+  const usesTerminal = status?.state === "ok" && status.signIn === "terminal";
+
   const signOut = async () => {
-    if (agent.id === "antigravity") {
+    if (usesTerminal) {
       if (
         !window.confirm(
           "Signing out also signs you out of the Antigravity CLI. A terminal will open: type /logout there. Continue?",
@@ -1550,8 +1564,6 @@ export const ClaudePanel = ({
                     ? "bridge offline"
                     : status.state === "signin_required"
                     ? "sign in required"
-                    : status.unsupported
-                    ? "not available here"
                     : status.loggedIn
                     ? status.email || `your ${name} account`
                     : "not connected"}
@@ -1661,12 +1673,7 @@ export const ClaudePanel = ({
                 )}
                 {status?.state === "ok" &&
                   !status.loggedIn &&
-                  (status.unsupported ? (
-                    <div className="claude-banner">
-                      <strong>{name} isn't available here</strong>
-                      <p>{status.unsupported}</p>
-                    </div>
-                  ) : agent.id === "antigravity" ? (
+                  (usesTerminal ? (
                     <AntigravityConnectCard
                       agent={agent}
                       installed={status.installed !== false}

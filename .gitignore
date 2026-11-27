@@ -26,7 +26,9 @@ coverage
 dev-dist
 html
 meta*.json
-.claude
+.claude/*
+# default skills for coding tools, see claude-bridge/install-skills.mjs
+!.claude/skills
 
 # Plus server deployment secrets
 .env.plus

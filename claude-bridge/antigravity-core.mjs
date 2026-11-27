@@ -27,7 +27,11 @@ export const isConversationId = (value) =>
   typeof value === "string" && CONVERSATION_ID.test(value);
 
 export const errorCodeFor = (text) => {
-  if (/not logged in|authentication required|unauthenticated/i.test(text)) {
+  if (
+    /not logged in|authentication (?:required|failed)|unauthenticated/i.test(
+      text,
+    )
+  ) {
     return "authentication_failed";
   }
   if (/quota|rate.?limit|resource.?exhausted|\b429\b/i.test(text)) {

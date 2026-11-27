@@ -13,9 +13,36 @@ yarn start                   # the app; /claude-bridge is proxied by Vite
 - `ANTHROPIC_API_KEY` is ignored so the subscription is used (set `CLAUDE_BRIDGE_ALLOW_API_KEY=1` to opt out).
 - Only `http://localhost:3000` and `http://localhost:3001` (the port in `.env.development`) may call it; set `CLAUDE_BRIDGE_ORIGINS` (comma-separated) if the app runs elsewhere, and `CLAUDE_BRIDGE_PORT` / `VITE_APP_CLAUDE_BRIDGE_URL` to change the port.
 
+## Several users on one bridge
+
+Multiuser mode (`CLAUDE_BRIDGE_MODE=multiuser`, the Docker deployment) serves all three assistants. Each signed-in user gets:
+
+- their own sign-ins, chats and temp files under `CLAUDE_BRIDGE_DATA/users/<hash>/`, and CLI environments without the server's secrets;
+- one chat at a time per assistant (`CLAUDE_BRIDGE_MAX_CONCURRENT`, default 8, caps all users and assistants together).
+
+All users run as the same operating-system user, so the separation rests on no agent being able to read someone else's files:
+
+| Agent | Own sign-in | What stops file reading |
+| --- | --- | --- |
+| Claude | `CLAUDE_CONFIG_DIR` | no built-in tools; `CLAUDE_CODE_DISABLE_ATTACHMENTS=1` (otherwise `@/path` in a message or on the canvas sends that file); only conversation ids can be resumed |
+| Codex | `CODEX_HOME`, credentials kept in a file | shell, image viewing and other tools switched off; a model list without `apply_patch`, which reads files even in the read-only sandbox |
+| Antigravity | its own `HOME`, token kept in a file | the guard hook, plus `read_file` deny rules on other users' folders and `/proc` in case the hook fails |
+
+Keep all of these, and run `yarn test` after updating any CLI or SDK: `test/isolation.node-test.mjs` and `test/agents.node-test.mjs` check this against the real CLIs (the Antigravity ones are skipped where `agy` isn't installed).
+
+Local mode has no authentication and only listens on this machine.
+
 ## Models
 
 - `GET /models` returns the models the signed-in account offers (the list Claude Code's `/model` picker shows); the panel sends the chosen one as `model` with each `POST /chat`. Asking for the list sends no prompt. It is cached for 10 minutes and dropped on sign-in or sign-out.
+
+## Default skills
+
+`skills/` holds the skills every assistant starts with: `designer`, `excalidraw` and `creativity` (one `SKILL.md` each).
+
+- **Chat panels** (Claude, Antigravity, Codex): the bridge adds the skills to their instructions. Restart the bridge after editing one.
+- **Coding tools in this repository**: copies in `.claude/skills` (Claude Code) and `.agents/skills` (Codex, Antigravity) are committed, so they work on clone. After editing a skill, run `yarn skills:sync`; `yarn test` in `claude-bridge` fails if the copies are stale.
+- **Coding tools everywhere**: `yarn skills:install` copies them to `~/.claude/skills`, `~/.agents/skills` and `~/.gemini/config/skills`. A skill of your own with the same name is kept unless you pass `--force`.
 
 ## Attachments and logs
 
@@ -32,7 +59,7 @@ The same bridge powers the **Antigravity** chat, picked from the plate at the bo
 - **Lockdown**: `agy` runs in `~/.excalidraw-antigravity`, where a `PreToolUse` hook (`antigravity-guard.mjs`) refuses every tool except the canvas ones and reading uploaded files. Permission rules also deny commands, file writes and URL access, and a turn is stopped if a refused tool ever runs.
 - **Attachments**: text files are inlined; images and PDFs are saved to the work folder for the turn, then deleted.
 - `agy` takes no system prompt (it opens each new conversation) and streams no thinking text.
-- **Local mode only**: `agy` keeps its login in the OS keyring, so a shared (multiuser) server shows the panel as unavailable.
+- **Shared server**: each user signs in by pasting a Google code into the panel; see [Several users on one bridge](#several-users-on-one-bridge).
 - Settings: `AGY_BIN`, `ANTIGRAVITY_WORK_DIR`. Routes are under `/claude-bridge/antigravity/`.
 
 ## Codex
@@ -47,5 +74,5 @@ The same bridge powers the **Codex** chat. Turns run through the [Codex SDK](htt
 - **Replies** arrive one finished paragraph at a time: the SDK doesn't stream partial text.
 - **Attachments**: text files and the text of PDFs are inlined (scanned PDFs can't be read); images are attached, then deleted.
 - `OPENAI_API_KEY` and `CODEX_API_KEY` are ignored (set `CODEX_BRIDGE_ALLOW_API_KEY=1` to keep them).
-- **Local mode only**: a shared (multiuser) server shows the panel as unavailable.
+- **Shared server**: each user signs in with a one-time code, in their own Codex home; see [Several users on one bridge](#several-users-on-one-bridge).
 - Settings: `CODEX_BIN`, `CODEX_BRIDGE_DATA`, `CODEX_BRIDGE_HOME`. Routes are under `/claude-bridge/codex/`.

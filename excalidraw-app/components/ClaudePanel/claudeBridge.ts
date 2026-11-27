@@ -47,8 +47,10 @@ export type BridgeStatus =
       plan?: string | null;
       /** false when the agent's CLI is missing on the bridge's machine */
       installed?: boolean;
-      /** why this bridge can't offer the agent at all */
-      unsupported?: string;
+      /** the signed-in app user, on a shared bridge */
+      user?: string;
+      /** Antigravity: "code" to paste one here, "terminal" to sign in there */
+      signIn?: "code" | "terminal";
     }
   | { state: "signin_required" }
   | { state: "offline" };
@@ -91,7 +93,8 @@ export const getStatus = async (
       email: json.email ?? null,
       plan: json.plan ?? null,
       installed: json.installed,
-      unsupported: json.unsupported,
+      user: json.user,
+      signIn: json.signIn,
     };
   } catch {
     return { state: "offline" };
@@ -115,13 +118,18 @@ export const getModels = async (base: string): Promise<ModelChoice[]> => {
   }
 };
 
-/** starts a browser sign-in: returns the page the user must authorize on */
-export const startLogin = async (base: string): Promise<string> => {
+/**
+ * Starts a browser sign-in: returns the page the user must authorize on and,
+ * for some agents, a one-time code to enter there.
+ */
+export const startLogin = async (
+  base: string,
+): Promise<{ url: string; userCode?: string }> => {
   const { ok, json } = await post(`${base}/auth/login`);
   if (!ok || !json?.url) {
     throw new Error(json?.error || "Couldn't start the sign-in.");
   }
-  return json.url;
+  return { url: json.url, userCode: json.userCode };
 };
 
 /** completes the login with the code shown after authorizing */
@@ -132,7 +140,7 @@ export const submitLoginCode = async (base: string, code: string) => {
   }
 };
 
-/** Antigravity signs in and out in its own CLI: the bridge opens a terminal */
+/** on your own computer Antigravity signs in and out in its CLI's terminal */
 export const openAgentTerminal = async (
   base: string,
   action: "login" | "logout",

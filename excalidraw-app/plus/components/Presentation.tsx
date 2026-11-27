@@ -16,6 +16,7 @@ import {
   useSetAtom,
 } from "../../app-jotai";
 import { cloudSession } from "../cloud";
+import { chatOpenAtom, hangoutAtom } from "../hangout";
 import {
   cloudSceneAtom,
   connectionIdAtom,
@@ -267,6 +268,9 @@ export const PresentationMode = ({ api }: { api: ExcalidrawImperativeAPI }) => {
       captureUpdate: CaptureUpdateAction.NEVER,
     });
     document.body.classList.add("plus-presenting");
+    // nothing beside the slide: the talk's chat stays away until asked for
+    const chatWasOpen = appJotaiStore.get(chatOpenAtom);
+    appJotaiStore.set(chatOpenAtom, false);
     if (!persistent) {
       document.documentElement.requestFullscreen?.().catch(() => {});
     }
@@ -281,6 +285,9 @@ export const PresentationMode = ({ api }: { api: ExcalidrawImperativeAPI }) => {
     return () => {
       document.removeEventListener("fullscreenchange", onFullscreenChange);
       document.body.classList.remove("plus-presenting");
+      if (chatWasOpen && appJotaiStore.get(hangoutAtom).joined) {
+        appJotaiStore.set(chatOpenAtom, true);
+      }
       if (document.fullscreenElement) {
         document.exitFullscreen().catch(() => {});
       }

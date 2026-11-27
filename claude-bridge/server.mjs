@@ -24,16 +24,15 @@
  */
 import { spawn } from "node:child_process";
 import { createHash, timingSafeEqual } from "node:crypto";
-import { mkdirSync } from "node:fs";
 import http from "node:http";
 import os from "node:os";
-import path from "node:path";
 import {
   query,
   createSdkMcpServer,
   tool,
 } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
+import { isConversationId } from "./antigravity-core.mjs";
 import { createAntigravity } from "./antigravity.mjs";
 import { CANVAS_TOOLS, summarizeScene, systemPrompt } from "./canvas.mjs";
 import {
@@ -46,6 +45,14 @@ import {
   validateAttachments,
 } from "./chat.mjs";
 import { createCodex } from "./codex.mjs";
+import {
+  cliEnv,
+  createChatSlots,
+  isLoopback,
+  shareInFlight,
+  userDirs,
+} from "./isolation.mjs";
+import { createCodeLogins } from "./login.mjs";
 
 const MULTIUSER = process.env.CLAUDE_BRIDGE_MODE === "multiuser";
 const PORT = Number(process.env.CLAUDE_BRIDGE_PORT || 3016);
@@ -155,7 +162,7 @@ const safeEqual = (a, b) => {
   return timingSafeEqual(ha, hb);
 };
 
-/** returns { id, configDir, workDir } or null when the caller isn't trusted */
+/** returns { id, workDir, … } or null when the caller isn't trusted */
 const identify = (req) => {
   if (!MULTIUSER) {
     return { id: "local", configDir: undefined, workDir: os.tmpdir() };
@@ -170,54 +177,7 @@ const identify = (req) => {
   ) {
     return null;
   }
-  const key = createHash("sha256").update(userId).digest("hex").slice(0, 32);
-  const base = path.join(DATA_DIR, "users", key);
-  const configDir = path.join(base, "config");
-  const workDir = path.join(base, "work");
-  mkdirSync(configDir, { recursive: true, mode: 0o700 });
-  mkdirSync(workDir, { recursive: true, mode: 0o700 });
-  return { id: userId, configDir, workDir, home: base };
-};
-
-const PASS_ENV = [
-  "PATH",
-  "LANG",
-  "LC_ALL",
-  "TZ",
-  "TERM",
-  "HTTP_PROXY",
-  "HTTPS_PROXY",
-  "NO_PROXY",
-  "http_proxy",
-  "https_proxy",
-  "no_proxy",
-  "NODE_EXTRA_CA_CERTS",
-  "SSL_CERT_FILE",
-  "SSL_CERT_DIR",
-];
-
-/**
- * Environment for Claude child processes. In multiuser mode it is an
- * allowlist, so neither server secrets nor a stray shared token/API key can
- * leak in and turn per-user logins into one shared subscription.
- */
-const cliEnv = (user) => {
-  const env = {};
-  if (MULTIUSER) {
-    for (const k of PASS_ENV) {
-      if (process.env[k]) env[k] = process.env[k];
-    }
-    env.HOME = user.home;
-    env.CLAUDE_CONFIG_DIR = user.configDir;
-  } else {
-    Object.assign(env, process.env);
-    if (!process.env.CLAUDE_BRIDGE_ALLOW_API_KEY) {
-      delete env.ANTHROPIC_API_KEY;
-      delete env.ANTHROPIC_AUTH_TOKEN;
-    }
-  }
-  env.CLAUDE_AGENT_SDK_CLIENT_APP = "excalidraw-claude-panel/0.2";
-  return env;
+  return { id: userId, ...userDirs(DATA_DIR, userId) };
 };
 
 const claudeBin = () => CLAUDE_BIN || "claude";
@@ -225,7 +185,7 @@ const claudeBin = () => CLAUDE_BIN || "claude";
 const runCli = (user, args, timeoutMs = 20000) =>
   new Promise((resolve) => {
     const p = spawn(claudeBin(), args, {
-      env: cliEnv(user),
+      env: cliEnv(user, MULTIUSER),
       stdio: ["ignore", "pipe", "pipe"],
     });
     let out = "";
@@ -239,7 +199,7 @@ const runCli = (user, args, timeoutMs = 20000) =>
     });
   });
 
-const getStatus = async (user) => {
+const readStatus = async (user) => {
   const { out } = await runCli(user, ["auth", "status"]);
   try {
     const json = JSON.parse(out.slice(out.indexOf("{")));
@@ -253,6 +213,9 @@ const getStatus = async (user) => {
   }
 };
 
+const sharedStatus = shareInFlight(readStatus);
+const getStatus = (user) => sharedStatus(user.id, user);
+
 const MODELS_TTL = 10 * 60 * 1000;
 const modelCache = new Map(); // userId -> { at, models }
 
@@ -260,7 +223,7 @@ const modelCache = new Map(); // userId -> { at, models }
  * The models this user's account offers, as Claude Code's own picker lists
  * them. Only asks the CLI; no prompt is sent, so it uses none of the plan.
  */
-const listModels = async (user) => {
+const readModels = async (user) => {
   const cached = modelCache.get(user.id);
   if (cached && Date.now() - cached.at < MODELS_TTL) {
     return cached.models;
@@ -279,7 +242,7 @@ const listModels = async (user) => {
       options: {
         abortController: abort,
         cwd: user.workDir,
-        env: cliEnv(user),
+        env: cliEnv(user, MULTIUSER),
         pathToClaudeCodeExecutable: CLAUDE_BIN || undefined,
         settingSources: [],
         tools: [],
@@ -295,100 +258,27 @@ const listModels = async (user) => {
   }
 };
 
+const sharedModels = shareInFlight(readModels);
+const listModels = (user) => sharedModels(user.id, user);
+
 // interactive `claude auth login`: prints a URL, then waits for the code the
 // user gets after authorizing in their browser
-const logins = new Map(); // userId -> { proc, output, timer }
-
-const killLogin = (userId) => {
-  const l = logins.get(userId);
-  if (l) {
-    clearTimeout(l.timer);
-    l.proc.kill();
-    logins.delete(userId);
-  }
-};
+const logins = createCodeLogins(findLoginUrl);
 
 const startLogin = (user) =>
-  new Promise((resolve, reject) => {
-    killLogin(user.id);
-    const proc = spawn(claudeBin(), ["auth", "login", "--claudeai"], {
-      env: { ...cliEnv(user), BROWSER: "true" },
+  logins.start(user.id, () =>
+    spawn(claudeBin(), ["auth", "login", "--claudeai"], {
+      env: { ...cliEnv(user, MULTIUSER), BROWSER: "true" },
       stdio: ["pipe", "pipe", "pipe"],
-    });
-    const entry = {
-      proc,
-      output: "",
-      exited: null,
-      timer: setTimeout(() => killLogin(user.id), 10 * 60 * 1000),
-    };
-    logins.set(user.id, entry);
-    let done = false;
-    const onData = (d) => {
-      entry.output += d;
-      const url = findLoginUrl(entry.output);
-      if (url && !done) {
-        done = true;
-        resolve(url);
-      }
-    };
-    proc.stdout.on("data", onData);
-    proc.stderr.on("data", onData);
-    proc.on("close", (code) => {
-      entry.exited = code;
-      if (!done) {
-        done = true;
-        reject(
-          new Error(
-            entry.output.trim().slice(0, 300) || "login failed to start",
-          ),
-        );
-      }
-    });
-    proc.on("error", (e) => !done && ((done = true), reject(e)));
-    setTimeout(
-      () =>
-        !done &&
-        ((done = true),
-        killLogin(user.id),
-        reject(new Error("Timed out starting login"))),
-      30000,
-    );
-  });
+    }),
+  );
 
 const submitCode = (user, code) =>
-  new Promise((resolve) => {
-    const entry = logins.get(user.id);
-    if (!entry || entry.exited !== null) {
-      return resolve({ ok: false, message: "Login expired. Start again." });
-    }
-    const finish = (ok, message) => {
-      clearTimeout(timer);
-      clearTimeout(entry.timer);
-      logins.delete(user.id);
-      resolve({ ok, message });
-    };
-    const timer = setTimeout(() => {
-      entry.proc.kill();
-      finish(false, "Timed out. Start again.");
-    }, 20000);
-    entry.proc.on("close", async (exitCode) => {
-      if (exitCode === 0) {
-        const status = await getStatus(user);
-        finish(
-          status.loggedIn,
-          status.loggedIn ? "" : "Sign-in did not complete.",
-        );
-      } else {
-        finish(false, "That code didn't work. Start again.");
-      }
-    });
-    entry.proc.stdin.write(`${code}\n`);
-  });
+  logins.submit(user.id, code, async () => (await getStatus(user)).loggedIn);
 
 // request handlers --------------------------------------------------------------
 
-let activeChats = 0;
-const activeUsers = new Set();
+const slots = createChatSlots(MAX_CONCURRENT);
 
 const handleChat = async (req, res, user) => {
   let payload;
@@ -406,18 +296,18 @@ const handleChat = async (req, res, user) => {
   if (model !== undefined && !isModelId(model)) {
     return sendJson(res, 400, { error: "Unknown model" });
   }
-  if (activeUsers.has(user.id)) {
-    return sendJson(res, 429, {
-      error: "Claude is still answering your previous message.",
-    });
+  // resume also accepts a transcript's file path: only ids may get through
+  if (sessionId && !isConversationId(sessionId)) {
+    return sendJson(res, 400, { error: "Unknown conversation" });
   }
-  if (activeChats >= MAX_CONCURRENT) {
-    return sendJson(res, 503, {
-      error: "The server is busy. Try again in a moment.",
-    });
+  // built before a slot is taken, so bad input can't leave the user stuck
+  const promptText = `${summarizeScene(
+    scene,
+  )}\n\n---\nUser request:\n${message}`;
+  const slot = slots.take("claude", user.id, "Claude");
+  if (!slot.release) {
+    return sendJson(res, slot.status, { error: slot.error });
   }
-  activeUsers.add(user.id);
-  activeChats++;
 
   res.writeHead(200, {
     "content-type": "text/event-stream",
@@ -433,10 +323,6 @@ const handleChat = async (req, res, user) => {
 
   const abort = new AbortController();
   res.on("close", () => abort.abort());
-
-  const promptText = `${summarizeScene(
-    scene,
-  )}\n\n---\nUser request:\n${message}`;
 
   // Files need content blocks, which the SDK takes as a stream of user turns.
   // The stream stays open until the answer is complete so canvas tools work.
@@ -463,7 +349,7 @@ const handleChat = async (req, res, user) => {
       options: {
         abortController: abort,
         cwd: user.workDir,
-        env: cliEnv(user),
+        env: cliEnv(user, MULTIUSER),
         pathToClaudeCodeExecutable: CLAUDE_BIN || undefined,
         // "default" means: whatever the account's default is
         model: model === "default" ? undefined : model,
@@ -494,8 +380,7 @@ const handleChat = async (req, res, user) => {
     }
   } finally {
     finish();
-    activeUsers.delete(user.id);
-    activeChats--;
+    slot.release();
     res.end();
   }
 };
@@ -519,23 +404,17 @@ const friendlyError = (code, detail) => {
   }
 };
 
-const handleAntigravity = createAntigravity({
+const agentOptions = {
   prefix: PREFIX,
   multiuser: MULTIUSER,
-  // where the local `agy` process reaches this bridge
+  // where the local agent processes reach this bridge
   mcpOrigin: `http://${HOST === "0.0.0.0" ? "127.0.0.1" : HOST}:${PORT}`,
+  slots,
   sendJson,
   readBody,
-});
-
-const handleCodex = createCodex({
-  prefix: PREFIX,
-  multiuser: MULTIUSER,
-  // where the local Codex process reaches this bridge
-  mcpOrigin: `http://${HOST === "0.0.0.0" ? "127.0.0.1" : HOST}:${PORT}`,
-  sendJson,
-  readBody,
-});
+};
+const antigravity = createAntigravity(agentOptions);
+const codex = createCodex(agentOptions);
 
 const server = http.createServer(async (req, res) => {
   try {
@@ -562,14 +441,23 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    // the agents' own processes call back for the canvas tools: they prove
+    // themselves with the turn's secret address, not as a user
+    if (
+      (await antigravity.mcp(req, res, url)) ||
+      (await codex.mcp(req, res, url))
+    ) {
+      return;
+    }
+
     const user = identify(req);
     if (!user) {
       return sendJson(res, 401, { error: "Unauthorized" });
     }
 
     if (
-      (await handleAntigravity(req, res, url)) ||
-      (await handleCodex(req, res, url))
+      (await antigravity.handle(req, res, url, user)) ||
+      (await codex.handle(req, res, url, user))
     ) {
       return;
     }
@@ -577,6 +465,8 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === `${PREFIX}/status`) {
       return sendJson(res, 200, {
         mode: MULTIUSER ? "multiuser" : "local",
+        // keeps saved chats apart in a shared browser
+        user: user.key,
         ...(await getStatus(user)),
       });
     }
@@ -619,13 +509,14 @@ const server = http.createServer(async (req, res) => {
       );
     }
     if (req.method === "POST" && url.pathname === `${PREFIX}/auth/logout`) {
-      killLogin(user.id);
+      logins.cancel(user.id);
       await runCli(user, ["auth", "logout"]);
       modelCache.delete(user.id);
       return sendJson(res, 200, { loggedIn: false });
     }
     if (req.method === "POST" && url.pathname === `${PREFIX}/chat`) {
-      return handleChat(req, res, user);
+      // awaited, so a failure is caught here instead of ending the process
+      return await handleChat(req, res, user);
     }
     sendJson(res, 404, { error: "Not found" });
   } catch (e) {
@@ -634,6 +525,14 @@ const server = http.createServer(async (req, res) => {
     else res.end();
   }
 });
+
+// local mode has no authentication: anyone who reaches it spends this sign-in
+if (!MULTIUSER && !isLoopback(HOST)) {
+  console.error(
+    "Local mode shares your sign-in with whoever can connect, so it only listens on 127.0.0.1. For several users set CLAUDE_BRIDGE_MODE=multiuser.",
+  );
+  process.exit(1);
+}
 
 server.listen(PORT, HOST, () => {
   console.log(

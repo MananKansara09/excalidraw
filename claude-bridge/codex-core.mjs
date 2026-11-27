@@ -33,8 +33,32 @@ const DISABLED_FEATURES = [
   "sleep_tool",
 ];
 
-/** `--config` overrides for one turn; `mcpUrl` is that turn's canvas server */
-export const codexConfig = ({ mcpUrl, instructions }) => ({
+/**
+ * The model list Codex runs from, without any model's file tools: `apply_patch`
+ * opens files even in the read-only sandbox and has no feature switch.
+ */
+export const lockCatalog = (catalog) => {
+  if (!catalog?.models?.length) {
+    throw new Error("Codex didn't list its models.");
+  }
+  return {
+    ...catalog,
+    models: catalog.models.map((model) => ({
+      ...model,
+      apply_patch_tool_type: null,
+      experimental_supported_tools: [],
+    })),
+  };
+};
+
+/**
+ * `--config` overrides for one turn; `mcpUrl` is that turn's canvas server and
+ * `modelCatalog` the file holding the locked model list.
+ */
+export const codexConfig = ({ mcpUrl, instructions, modelCatalog }) => ({
+  model_catalog_json: modelCatalog,
+  // a sign-in kept in this Codex home, never in a keyring others could share
+  cli_auth_credentials_store: "file",
   developer_instructions: instructions,
   model_reasoning_summary: "auto",
   features: Object.fromEntries(DISABLED_FEATURES.map((name) => [name, false])),

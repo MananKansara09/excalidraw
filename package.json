@@ -96,6 +96,8 @@
     "rm:node_modules": "rimraf --glob node_modules excalidraw-app/node_modules packages/*/node_modules",
     "clean-install": "yarn rm:node_modules && yarn install",
     "start:plus-server": "yarn --cwd ./plus-server start",
+    "skills:sync": "node claude-bridge/install-skills.mjs",
+    "skills:install": "node claude-bridge/install-skills.mjs --global",
     "install:claude-bridge": "yarn --cwd ./claude-bridge install",
     "start:claude-bridge": "yarn --cwd ./claude-bridge start",
     "start:antigravity-bridge": "yarn start:claude-bridge",

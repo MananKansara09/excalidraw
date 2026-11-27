@@ -1,6 +1,6 @@
-# Claude bridge for the Excalidraw Claude panel, multiuser mode: each signed-in
-# user connects their own Claude account. Only reachable from the Plus server
-# on the compose network. See DEPLOY.md.
+# Bridge for the Excalidraw assistant panels (Claude, Codex, Antigravity),
+# multiuser mode: each signed-in user connects their own accounts. Only
+# reachable from the Plus server on the compose network. See DEPLOY.md.
 
 FROM node:22-bookworm-slim
 
@@ -9,7 +9,18 @@ ENV NODE_ENV=production \
     CLAUDE_BRIDGE_HOST=0.0.0.0 \
     CLAUDE_BRIDGE_PORT=3016 \
     CLAUDE_BRIDGE_DATA=/data \
-    CLAUDE_BIN=/usr/local/bin/claude
+    CLAUDE_BIN=/usr/local/bin/claude \
+    AGY_BIN=/usr/local/bin/agy
+
+# certificates for the Codex and Antigravity CLIs
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates curl \
+  && rm -rf /var/lib/apt/lists/*
+
+# the Antigravity CLI, from Google's installer (it checks the download's
+# checksum; it always installs the latest release)
+RUN curl -fsSL https://antigravity.google/cli/install.sh \
+  | bash -s -- --dir /usr/local/bin
 
 # the Claude Code CLI: runs `claude auth login` and powers the Agent SDK
 # (keep this version in step with the SDK in package.json)
@@ -20,8 +31,9 @@ COPY claude-bridge/package.json ./
 RUN npm install --omit=dev --no-package-lock --no-audit --no-fund
 
 COPY claude-bridge/*.mjs ./
+COPY claude-bridge/skills ./skills
 
-# per-user Claude logins live here: keep it on a volume (and private)
+# per-user sign-ins live here: keep it on a volume (and private)
 RUN mkdir -p /data && chown node:node /data
 USER node
 VOLUME /data

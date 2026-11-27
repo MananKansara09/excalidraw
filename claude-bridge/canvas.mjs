@@ -1,6 +1,7 @@
 /**
  * What both agents (Claude and Antigravity) are told about the canvas.
  */
+import { skillsPrompt } from "./skills.mjs";
 
 export const CANVAS_TOOLS = [
   "add_elements",
@@ -25,7 +26,9 @@ Element rules (Excalidraw "skeleton" format):
 - Use a consistent, tasteful palette (e.g. fills #a5d8ff, #b2f2bb, #ffec99, #ffc9c9, #d0bfff with stroke #1e1e1e).
 - Add a title text above bigger diagrams. Draw in as few tool calls as possible (batch all elements in one add_elements call; create referenced shapes in the same batch).
 - To change existing elements use update_elements with their ids from the scene summary; to remove use delete_elements.
-When the user attaches files (PDFs, images, text), read them and apply them to the canvas as asked: turn a document into a diagram or slides, redraw a screenshot, follow instructions written in it. Summarize rather than copy long passages.`;
+When the user attaches files (PDFs, images, text), read them and apply them to the canvas as asked: turn a document into a diagram or slides, redraw a screenshot, follow instructions written in it. Summarize rather than copy long passages.
+
+${skillsPrompt()}`;
 
 export const summarizeScene = (scene) => {
   if (!scene || !Array.isArray(scene.elements) || !scene.elements.length) {
@@ -39,8 +42,9 @@ export const summarizeScene = (scene) => {
     scene.elements.length > 200
       ? `\n(+${scene.elements.length - 200} more not shown)`
       : "";
-  const sel = scene.selectedIds?.length
-    ? `\nCurrently selected ids: ${scene.selectedIds.join(", ")}`
-    : "";
+  const sel =
+    Array.isArray(scene.selectedIds) && scene.selectedIds.length
+      ? `\nCurrently selected ids: ${scene.selectedIds.join(", ")}`
+      : "";
   return `Current canvas (one JSON per line: id,type,x,y,w,h,text,...):\n${lines}${more}${sel}`;
 };
