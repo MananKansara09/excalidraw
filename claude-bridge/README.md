@@ -34,3 +34,18 @@ The same bridge powers the **Antigravity** chat, picked from the plate at the bo
 - `agy` takes no system prompt (it opens each new conversation) and streams no thinking text.
 - **Local mode only**: `agy` keeps its login in the OS keyring, so a shared (multiuser) server shows the panel as unavailable.
 - Settings: `AGY_BIN`, `ANTIGRAVITY_WORK_DIR`. Routes are under `/claude-bridge/antigravity/`.
+
+## Codex
+
+The same bridge powers the **Codex** chat. Turns run through the [Codex SDK](https://www.npmjs.com/package/@openai/codex-sdk); sign-in and the model list come from `codex app-server`, the CLI that ships with the SDK, so requests use **your own ChatGPT plan**.
+
+- **Install and run** (from the repo root): `yarn install:codex-bridge`, then `yarn start:codex-bridge`, or `yarn dev:codex-bridge` to restart on file changes. One process on port 3016 serves all three chats: run only one of these commands.
+- **Sign-in / sign-out**: **Sign in with ChatGPT** in the panel opens the approval page; the panel updates once you approve. The browser must be on the bridge's machine.
+- **Separate from your Codex CLI**: the panel keeps its sign-in, settings and sessions in `~/.excalidraw-codex`, so your Codex MCP servers, plugins and hooks never load. Sign in once in the panel.
+- **Canvas edits**: the bridge serves the canvas tools to Codex as an MCP server. Each turn has a new secret address.
+- **Lockdown**: commands, file viewing, browsing, plugins, apps and sub-agents are switched off, the sandbox is read-only, nothing can be approved, and a turn is stopped if a command, file change or web search shows up.
+- **Replies** arrive one finished paragraph at a time: the SDK doesn't stream partial text.
+- **Attachments**: text files and the text of PDFs are inlined (scanned PDFs can't be read); images are attached, then deleted.
+- `OPENAI_API_KEY` and `CODEX_API_KEY` are ignored (set `CODEX_BRIDGE_ALLOW_API_KEY=1` to keep them).
+- **Local mode only**: a shared (multiuser) server shows the panel as unavailable.
+- Settings: `CODEX_BIN`, `CODEX_BRIDGE_DATA`, `CODEX_BRIDGE_HOME`. Routes are under `/claude-bridge/codex/`.

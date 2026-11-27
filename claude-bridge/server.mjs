@@ -15,7 +15,8 @@
  *      Claude account from the UI (`claude auth login`, code pasted back).
  *
  * It also serves the "Antigravity" panel under /claude-bridge/antigravity/*,
- * see antigravity.mjs.
+ * see antigravity.mjs, and the "Codex" panel under /claude-bridge/codex/*, see
+ * codex.mjs.
  *
  * Claude can't touch files or run commands here: all built-in tools are
  * disabled. The only tools it gets draw on the canvas (the browser applies
@@ -44,6 +45,7 @@ import {
   translateMessage,
   validateAttachments,
 } from "./chat.mjs";
+import { createCodex } from "./codex.mjs";
 
 const MULTIUSER = process.env.CLAUDE_BRIDGE_MODE === "multiuser";
 const PORT = Number(process.env.CLAUDE_BRIDGE_PORT || 3016);
@@ -526,6 +528,15 @@ const handleAntigravity = createAntigravity({
   readBody,
 });
 
+const handleCodex = createCodex({
+  prefix: PREFIX,
+  multiuser: MULTIUSER,
+  // where the local Codex process reaches this bridge
+  mcpOrigin: `http://${HOST === "0.0.0.0" ? "127.0.0.1" : HOST}:${PORT}`,
+  sendJson,
+  readBody,
+});
+
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, "http://bridge");
@@ -556,7 +567,10 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 401, { error: "Unauthorized" });
     }
 
-    if (await handleAntigravity(req, res, url)) {
+    if (
+      (await handleAntigravity(req, res, url)) ||
+      (await handleCodex(req, res, url))
+    ) {
       return;
     }
 

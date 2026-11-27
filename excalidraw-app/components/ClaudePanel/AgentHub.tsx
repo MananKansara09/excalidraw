@@ -27,7 +27,7 @@ const loadPrefs = (): Prefs => {
     open: !!raw.open,
     wide: !!raw.wide,
     mode: raw.mode === "panel" ? "panel" : "bar",
-    agent: raw.agent === "antigravity" ? "antigravity" : "claude",
+    agent: AGENTS.find((a) => a.id === raw.agent)?.id ?? "claude",
   };
 };
 

@@ -115,11 +115,11 @@ export const getModels = async (base: string): Promise<ModelChoice[]> => {
   }
 };
 
-/** starts `claude auth login`: returns the page the user must authorize on */
+/** starts a browser sign-in: returns the page the user must authorize on */
 export const startLogin = async (base: string): Promise<string> => {
   const { ok, json } = await post(`${base}/auth/login`);
   if (!ok || !json?.url) {
-    throw new Error(json?.error || "Couldn't start the Claude sign-in.");
+    throw new Error(json?.error || "Couldn't start the sign-in.");
   }
   return json.url;
 };

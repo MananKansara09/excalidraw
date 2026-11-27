@@ -1,12 +1,13 @@
-// The assistants the chat can talk to. Both are served by the local bridge and
+// The assistants the chat can talk to. All are served by the local bridge and
 // share one chat UI; each keeps its own chats, logs and model choice.
 
 import { AntigravityLogo } from "./AntigravityLogo";
 import { ClaudeLogo } from "./ClaudeLogo";
+import { CodexLogo } from "./CodexLogo";
 
 import type { ComponentType } from "react";
 
-export type AgentId = "claude" | "antigravity";
+export type AgentId = "claude" | "antigravity" | "codex";
 
 export type Agent = {
   id: AgentId;
@@ -34,5 +35,13 @@ export const AGENTS: readonly Agent[] = [
     Logo: AntigravityLogo,
     historyKey: "excalidraw-antigravity-history",
     modelKey: "excalidraw-antigravity-model",
+  },
+  {
+    id: "codex",
+    name: "Codex",
+    base: "/claude-bridge/codex",
+    Logo: CodexLogo,
+    historyKey: "excalidraw-codex-history",
+    modelKey: "excalidraw-codex-model",
   },
 ];

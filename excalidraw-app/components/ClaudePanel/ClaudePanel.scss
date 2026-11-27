@@ -124,6 +124,13 @@ $serif: ui-serif, "Iowan Old Style", "Palatino Linotype", Georgia, serif;
   --cl-accent-soft: rgba(49, 134, 255, 0.14);
 }
 
+// Codex wears the indigo of its logo
+.claude-root.agent-codex {
+  --cl-accent: #5b6cff;
+  --cl-accent-strong: #3941ff;
+  --cl-accent-soft: rgba(91, 108, 255, 0.15);
+}
+
 .claude-root[hidden] {
   display: none;
 }
@@ -185,6 +192,9 @@ $serif: ui-serif, "Iowan Old Style", "Palatino Linotype", Georgia, serif;
   }
   &.agent-antigravity {
     --chip: #3186ff;
+  }
+  &.agent-codex {
+    --chip: #5b6cff;
   }
   &:hover {
     opacity: 1;

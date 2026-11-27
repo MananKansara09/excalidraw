@@ -357,6 +357,93 @@ const AntigravityConnectCard = ({
   );
 };
 
+/**
+ * Codex signs in to ChatGPT in the browser, which hands the login straight back
+ * to the bridge: open the page, then watch for the login to appear.
+ */
+const CodexConnectCard = ({
+  agent,
+  installed,
+  onCheck,
+}: {
+  agent: Agent;
+  installed: boolean;
+  onCheck: () => void;
+}) => {
+  const [url, setUrl] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!url) {
+      return;
+    }
+    const id = window.setInterval(onCheck, 3000);
+    return () => window.clearInterval(id);
+  }, [url, onCheck]);
+
+  const begin = async () => {
+    setBusy(true);
+    setError("");
+    // open synchronously so the popup isn't blocked, point it once we have the URL
+    const popup = window.open("", "_blank");
+    try {
+      const authUrl = await startLogin(agent.base);
+      setUrl(authUrl);
+      if (popup) {
+        popup.opener = null;
+        popup.location.href = authUrl;
+      }
+    } catch (e: any) {
+      popup?.close();
+      setError(e.message);
+    }
+    setBusy(false);
+  };
+
+  return (
+    <div className="claude-connect">
+      <agent.Logo size={36} />
+      <h3>Sign in to Codex</h3>
+      {installed ? (
+        <>
+          <p>
+            Codex uses <b>your own</b> ChatGPT plan. You only do this once.
+          </p>
+          <button className="claude-primary" onClick={begin} disabled={busy}>
+            {busy
+              ? "Starting…"
+              : url
+              ? "Start sign-in again"
+              : "Sign in with ChatGPT"}
+          </button>
+          {url && (
+            <>
+              <a href={url} target="_blank" rel="noopener noreferrer">
+                Open the sign-in page
+              </a>
+              <p className="claude-shimmer">
+                Approve access in the browser. This updates on its own.
+              </p>
+            </>
+          )}
+        </>
+      ) : (
+        <>
+          <p>
+            Install Codex for the bridge (<code>yarn install:codex-bridge</code>
+            ), restart it, then check again.
+          </p>
+          <button className="claude-primary" onClick={onCheck}>
+            Check again
+          </button>
+        </>
+      )}
+      {error && <div className="claude-connect-error">{error}</div>}
+    </div>
+  );
+};
+
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 /** one step of Claude's work: "Drawing · 12 elements", with its outcome */
@@ -1581,6 +1668,12 @@ export const ClaudePanel = ({
                     </div>
                   ) : agent.id === "antigravity" ? (
                     <AntigravityConnectCard
+                      agent={agent}
+                      installed={status.installed !== false}
+                      onCheck={checkStatus}
+                    />
+                  ) : agent.id === "codex" ? (
+                    <CodexConnectCard
                       agent={agent}
                       installed={status.installed !== false}
                       onCheck={checkStatus}

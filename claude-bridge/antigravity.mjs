@@ -29,6 +29,7 @@ import {
 } from "./antigravity-core.mjs";
 import { summarizeScene, systemPrompt } from "./canvas.mjs";
 import { isModelId, MAX_CHAT_BODY, validateAttachments } from "./chat.mjs";
+import { killTree } from "./process.mjs";
 
 const AGY_BIN = process.env.AGY_BIN || "agy";
 const WORK_DIR =
@@ -69,19 +70,6 @@ const agyEnv = () => {
     .filter(Boolean)
     .join(path.delimiter);
   return env;
-};
-
-const killTree = (proc) => {
-  if (proc.exitCode !== null || !proc.pid) {
-    return;
-  }
-  if (process.platform === "win32") {
-    spawn("taskkill", ["/pid", String(proc.pid), "/T", "/F"], {
-      stdio: "ignore",
-    }).on("error", () => proc.kill());
-  } else {
-    proc.kill();
-  }
 };
 
 // account -----------------------------------------------------------------------
