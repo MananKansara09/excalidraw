@@ -20,6 +20,15 @@ export const overwriteConfirmStateAtom = atom<OverwriteConfirmState>({
   active: false,
 });
 
+/** Dismisses the open confirm modal, same as the user closing it. */
+export function closeConfirmModal() {
+  const state = editorJotaiStore.get(overwriteConfirmStateAtom);
+  if (state.active) {
+    state.onClose();
+    editorJotaiStore.set(overwriteConfirmStateAtom, { active: false });
+  }
+}
+
 export async function openConfirmModal({
   title,
   description,
