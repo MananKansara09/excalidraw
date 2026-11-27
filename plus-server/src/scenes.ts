@@ -158,22 +158,75 @@ export const sceneSummary = (scene: SceneRow, role?: SceneRole | null) => {
     elementCount: elements.filter((element) => !element.isDeleted).length,
     createdAt: scene.created_at,
     updatedAt: scene.updated_at,
+    /** When the preview image was rendered; `null` if there is none yet. */
+    thumbnailAt: scene.thumbnail ? scene.thumbnail_at ?? null : null,
     ...(role ? { role } : {}),
   };
+};
+
+const FRAME_TYPES = ["frame", "magicframe"];
+
+/**
+ * What a presentation-only viewer may see: the frames (slides) and what's
+ * drawn inside them. Everything else in the scene stays on the server.
+ */
+export const slidesView = (elements: SceneElement[]) => {
+  const liveFrames = new Set(
+    elements
+      .filter((e) => FRAME_TYPES.includes(e.type ?? "") && !e.isDeleted)
+      .map((e) => e.id),
+  );
+  return elements.filter(
+    (e) =>
+      FRAME_TYPES.includes(e.type ?? "") ||
+      (typeof e.frameId === "string" && liveFrames.has(e.frameId)),
+  );
+};
+
+/** Only the files the given elements actually use. */
+export const filesForElements = (
+  files: Record<string, SceneFile>,
+  elements: SceneElement[],
+) => {
+  const used = new Set(
+    elements
+      .filter((e) => e.type === "image" && typeof e.fileId === "string")
+      .map((e) => e.fileId as string),
+  );
+  return Object.fromEntries(
+    Object.entries(files).filter(([id]) => used.has(id)),
+  );
 };
 
 export const sceneDetail = (
   db: DB,
   scene: SceneRow,
   role: SceneRole,
-  { includeFiles = true } = {},
-) => ({
-  ...sceneSummary(scene, role),
-  elements: JSON.parse(scene.elements) as SceneElement[],
-  appState: JSON.parse(scene.app_state),
-  presentation: JSON.parse(scene.presentation) as string[],
-  ...(includeFiles ? { files: getSceneFiles(db, scene.id) } : {}),
-});
+  { includeFiles = true, slidesOnly = false } = {},
+) => {
+  const stored = JSON.parse(scene.elements) as SceneElement[];
+  const elements = slidesOnly ? slidesView(stored) : stored;
+  const appState = JSON.parse(scene.app_state);
+  return {
+    ...sceneSummary(scene, role),
+    ...(slidesOnly
+      ? { elementCount: elements.filter((e) => !e.isDeleted).length }
+      : {}),
+    slidesOnly,
+    elements,
+    appState: slidesOnly
+      ? { viewBackgroundColor: appState.viewBackgroundColor }
+      : appState,
+    presentation: JSON.parse(scene.presentation) as string[],
+    ...(includeFiles
+      ? {
+          files: slidesOnly
+            ? filesForElements(getSceneFiles(db, scene.id), elements)
+            : getSceneFiles(db, scene.id),
+        }
+      : {}),
+  };
+};
 
 export const createScene = (
   db: DB,

@@ -4,7 +4,7 @@ import { CaptureUpdateAction } from "@excalidraw/element";
 
 import { invariant } from "@excalidraw/common";
 
-import { getClientColor } from "../clients";
+import { getClientColor, getCollaboratorActivityLabel } from "../clients";
 import { Avatar } from "../components/Avatar";
 import {
   eyeIcon,
@@ -58,9 +58,14 @@ export const actionGoToCollaborator = register<Collaborator>({
       captureUpdate: CaptureUpdateAction.EVENTUALLY,
     };
   },
-  PanelComponent: ({ updateData, data, appState }) => {
-    const { socketId, collaborator, withName, isBeingFollowed } =
-      data as GoToCollaboratorComponentProps;
+  PanelComponent: ({ updateData, data }) => {
+    const {
+      socketId,
+      collaborator,
+      withName,
+      isBeingFollowed,
+      openProfileOnClick,
+    } = data as GoToCollaboratorComponentProps;
 
     const background = getClientColor(socketId, collaborator);
 
@@ -94,6 +99,11 @@ export const actionGoToCollaborator = register<Collaborator>({
       )
     ) : null;
 
+    const activityLabel =
+      withName && !collaborator.isCurrentUser
+        ? getCollaboratorActivityLabel(collaborator)
+        : null;
+
     return withName ? (
       <div
         className={`dropdown-menu-item dropdown-menu-item-base UserList__collaborator ${statusClassNames}`}
@@ -111,8 +121,15 @@ export const actionGoToCollaborator = register<Collaborator>({
           src={collaborator.avatarUrl}
           className={statusClassNames}
         />
-        <div className="UserList__collaborator-name">
-          {collaborator.username}
+        <div className="UserList__collaborator-details">
+          <div className="UserList__collaborator-name">
+            {collaborator.username}
+          </div>
+          {activityLabel && (
+            <div className="UserList__collaborator-activity">
+              {activityLabel}
+            </div>
+          )}
         </div>
         <div className="UserList__collaborator-status-icons" aria-hidden>
           {isBeingFollowed && (
@@ -122,6 +139,11 @@ export const actionGoToCollaborator = register<Collaborator>({
             >
               {eyeIcon}
             </div>
+          )}
+          {!collaborator.isCurrentUser && !isBeingFollowed && (
+            <span className="UserList__collaborator-follow-pill">
+              {t("userList.profile.follow")}
+            </span>
           )}
           {collaborator.isCurrentUser && ` (${t("labels.you")})`}
           {statusIconJSX}
@@ -134,16 +156,27 @@ export const actionGoToCollaborator = register<Collaborator>({
         <Avatar
           color={background}
           onClick={() => {
-            updateData(collaborator);
+            if (!openProfileOnClick) {
+              updateData(collaborator);
+            }
           }}
           name={collaborator.username || ""}
           src={collaborator.avatarUrl}
           className={statusClassNames}
         />
-        {statusIconJSX && (
+        {statusIconJSX ? (
           <div className="UserList__collaborator-status-icon">
             {statusIconJSX}
           </div>
+        ) : (
+          isBeingFollowed && (
+            <div
+              className="UserList__collaborator-status-icon UserList__collaborator-status-icon--followed"
+              title={t("userList.hint.followStatus")}
+            >
+              {eyeIcon}
+            </div>
+          )
         )}
       </div>
     );

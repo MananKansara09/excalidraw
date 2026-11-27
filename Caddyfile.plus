@@ -1,6 +1,7 @@
 # Site block for the Caddy running on the host. Add it to your Caddyfile
 # (usually /etc/caddy/Caddyfile), replace the domain, then reload Caddy.
-# The port must match PLUS_PORT in .env.plus (default 3015).
+# The ports must match PLUS_PORT and ROOM_PORT in .env.plus (defaults 3015
+# and 3002).
 
 draw.example.com {
 	# compress static assets only: event streams must reach clients unbuffered
@@ -14,7 +15,13 @@ draw.example.com {
 			header Content-Type image/svg+xml*
 		}
 	}
-	reverse_proxy 127.0.0.1:3015 {
-		flush_interval -1
+	# live collaboration
+	handle /socket.io/* {
+		reverse_proxy 127.0.0.1:3002
+	}
+	handle {
+		reverse_proxy 127.0.0.1:3015 {
+			flush_interval -1
+		}
 	}
 }

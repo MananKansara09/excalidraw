@@ -1,7 +1,7 @@
 import clsx from "clsx";
 import { Fragment, useLayoutEffect, useMemo, useRef, useState } from "react";
 
-import { initials } from "./ui";
+import { PlusAvatar } from "./ui";
 
 import type { Mention, Person } from "../api";
 
@@ -174,9 +174,11 @@ export const MentionInput = ({
               }}
               onMouseEnter={() => setHighlighted(index)}
             >
-              <span className="plus-avatar small" aria-hidden="true">
-                {initials(person.name)}
-              </span>
+              <PlusAvatar
+                name={person.name}
+                avatarUrl={person.avatarUrl}
+                size="small"
+              />
               <span className="plus-mention-list__text">
                 <span>{person.name}</span>
                 <span className="plus-muted">{person.email}</span>

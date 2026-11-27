@@ -1,0 +1,1370 @@
+// Claude chat: a one-line bar on the canvas OR a right-side panel (one at a time), styled
+// after the Claude Code interface (warm neutrals, coral accent, light + dark).
+
+.claude-root {
+  --cl-bg: #faf9f5;
+  --cl-surface: #f0eee6;
+  --cl-raised: #ffffff;
+  --cl-border: #e3e0d5;
+  --cl-text: #29261e;
+  --cl-muted: #77746b;
+  --cl-accent: #d97757;
+  --cl-accent-text: #ffffff;
+  --cl-error: #b42318;
+  --cl-error-bg: rgba(217, 45, 32, 0.08);
+  --cl-shadow: 0 8px 28px rgba(41, 38, 30, 0.16);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: var(--cl-text);
+
+  &.theme-dark {
+    --cl-bg: #262624;
+    --cl-surface: #30302e;
+    --cl-raised: #1f1e1d;
+    --cl-border: #41403c;
+    --cl-text: #f5f4ee;
+    --cl-muted: #a3a099;
+    --cl-error: #ff8a80;
+    --cl-error-bg: rgba(255, 99, 88, 0.12);
+    --cl-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+  }
+}
+
+// shared bits -----------------------------------------------------------------
+
+.claude-avatar {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.12);
+  color: var(--cl-accent-text);
+  background: var(--cl-accent);
+  &.lg {
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+  }
+}
+
+.claude-dot {
+  flex: none;
+  font-size: 9px;
+  line-height: 1.9;
+  color: var(--cl-muted);
+  &.ok {
+    color: #3fa66b;
+  }
+}
+
+.claude-spinner {
+  display: inline-block;
+  flex: none;
+  width: 1.1em;
+  text-align: center;
+  color: var(--cl-accent);
+  font-size: 15px;
+  line-height: 1.3;
+}
+
+// moving highlight across "Thinking…" like Claude Code
+.claude-shimmer {
+  background: linear-gradient(
+      100deg,
+      var(--cl-muted) 35%,
+      var(--cl-accent) 50%,
+      var(--cl-muted) 65%
+    )
+    0 0 / 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: claude-shimmer 1.8s linear infinite;
+}
+@keyframes claude-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+// corner icon -----------------------------------------------------------------
+
+.claude-fab {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border: 0;
+  border-radius: 50%;
+  color: var(--cl-accent-text);
+  background: var(--cl-accent);
+  box-shadow: var(--cl-shadow);
+  cursor: pointer;
+  animation: claude-pop 0.25s ease;
+  transition: transform 0.15s ease;
+  svg {
+    transition: transform 0.4s ease;
+  }
+  &:hover {
+    transform: scale(1.07);
+    svg {
+      transform: rotate(45deg);
+    }
+  }
+  &.busy svg {
+    animation: claude-spin 2.4s linear infinite;
+  }
+}
+
+@keyframes claude-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes claude-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+}
+
+// one-line bar on the canvas --------------------------------------------------
+
+.claude-bar {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  z-index: 4;
+  width: min(560px, calc(100% - 200px));
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  &.dragging {
+    outline: 2px dashed var(--cl-accent);
+    outline-offset: 6px;
+    border-radius: 16px;
+  }
+}
+
+.claude-bar-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 12px;
+  border: 1px solid var(--cl-border);
+  border-radius: 12px;
+  background: var(--cl-bg);
+  box-shadow: var(--cl-shadow);
+  animation: claude-rise 0.2s ease;
+}
+
+.claude-bar-setup {
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  color: var(--cl-muted);
+  cursor: pointer;
+  &:hover {
+    border-color: var(--cl-accent);
+    color: var(--cl-text);
+  }
+}
+
+@keyframes claude-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+.claude-bar-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  &.user {
+    color: var(--cl-muted);
+  }
+  &.error .claude-bar-text {
+    color: var(--cl-error);
+  }
+  .claude-dot {
+    line-height: 1.5;
+  }
+}
+.claude-bar-prompt {
+  flex: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--cl-accent);
+}
+// the single-line guarantee
+.claude-bar-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+// the editor styles bare inputs globally; keep ours borderless
+.claude-root .claude-bar-input input,
+.claude-root .claude-composer textarea {
+  border: 0;
+  outline: none;
+  box-shadow: none;
+  background: transparent;
+  &:focus {
+    border: 0;
+    outline: none;
+    box-shadow: none;
+  }
+}
+
+.claude-bar-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 6px 6px 8px;
+  border: 1px solid var(--cl-border);
+  border-radius: 14px;
+  background: var(--cl-bg);
+  box-shadow: var(--cl-shadow);
+  transition: border-color 0.15s, box-shadow 0.15s;
+  &:focus-within {
+    border-color: var(--cl-accent);
+    box-shadow: var(--cl-shadow), 0 0 0 3px rgba(217, 119, 87, 0.22);
+  }
+  input {
+    flex: 1;
+    min-width: 0;
+    height: 28px;
+    border: 0;
+    outline: none;
+    font: inherit;
+    font-size: 14px;
+    color: var(--cl-text);
+    background: transparent;
+    &::placeholder {
+      color: var(--cl-muted);
+    }
+  }
+}
+
+.claude-send {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 50%;
+  color: var(--cl-accent-text);
+  background: var(--cl-accent);
+  cursor: pointer;
+  transition: transform 0.12s, opacity 0.12s;
+  &:hover:not(:disabled) {
+    transform: scale(1.06);
+  }
+  &:disabled {
+    opacity: 0.35;
+    cursor: default;
+  }
+  &.stop {
+    background: var(--cl-text);
+    color: var(--cl-bg);
+  }
+}
+
+// right-hand chat panel -------------------------------------------------------
+
+.claude-panel {
+  position: absolute;
+  z-index: 5;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  width: min(400px, 100%);
+  color: var(--cl-text);
+  background: var(--cl-bg);
+  border-left: 1px solid var(--cl-border);
+  box-shadow: var(--cl-shadow);
+  animation: claude-slide-in 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: width 0.25s ease;
+  &.wide {
+    width: min(600px, 50vw);
+  }
+}
+
+@keyframes claude-slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(32px);
+  }
+}
+
+.claude-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--cl-border);
+
+  .claude-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    strong {
+      display: block;
+      font-size: 14px;
+      line-height: 1.2;
+    }
+  }
+  .claude-status {
+    display: block;
+    overflow: hidden;
+    font-size: 11px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    color: var(--cl-muted);
+    &::before {
+      content: "";
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      margin-right: 5px;
+      border-radius: 50%;
+      background: #e0a030;
+    }
+    &.up::before {
+      background: #3fa66b;
+    }
+    &.down::before {
+      background: #d92d20;
+    }
+  }
+}
+
+.claude-actions {
+  display: flex;
+  gap: 2px;
+  button {
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    border: 0;
+    border-radius: 8px;
+    color: var(--cl-muted);
+    background: transparent;
+    cursor: pointer;
+    &:hover:not(:disabled) {
+      color: var(--cl-text);
+      background: var(--cl-surface);
+    }
+    &:disabled {
+      opacity: 0.35;
+      cursor: default;
+    }
+  }
+}
+
+.claude-messages {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  user-select: text;
+}
+
+.claude-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: claude-rise 0.2s ease;
+  font-size: 14px;
+  line-height: 1.55;
+
+  // the user's prompt, boxed like Claude Code's input echo
+  &.user .claude-user-text {
+    padding: 8px 12px;
+    border: 1px solid var(--cl-border);
+    border-radius: 10px;
+    background: var(--cl-surface);
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  &.error .claude-reply-text {
+    color: var(--cl-error);
+  }
+}
+
+.claude-reply {
+  display: flex;
+  gap: 8px;
+  .claude-reply-text {
+    flex: 1;
+    min-width: 0;
+    word-break: break-word;
+  }
+}
+
+.claude-tool {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--cl-muted);
+  .claude-spinner,
+  .claude-dot {
+    align-self: center;
+  }
+}
+
+.claude-thinking {
+  font-size: 13px;
+  color: var(--cl-muted);
+  .claude-thinking-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0;
+    border: 0;
+    font: inherit;
+    color: inherit;
+    background: none;
+    cursor: pointer;
+    &:hover {
+      color: var(--cl-text);
+    }
+  }
+  .claude-caret {
+    display: inline-block;
+    transition: transform 0.15s;
+    &.open {
+      transform: rotate(90deg);
+    }
+  }
+  .claude-thinking-body {
+    max-height: 220px;
+    margin: 6px 0 0 9px;
+    padding-left: 12px;
+    overflow-y: auto;
+    border-left: 2px solid var(--cl-border);
+    font-style: italic;
+    word-break: break-word;
+    animation: claude-rise 0.15s ease;
+  }
+}
+
+.claude-banner {
+  padding: 12px;
+  border-radius: 10px;
+  font-size: 13px;
+  color: var(--cl-error);
+  background: var(--cl-error-bg);
+  border: 1px solid var(--cl-error-bg);
+  p {
+    margin: 6px 0;
+    color: var(--cl-muted);
+  }
+  code {
+    display: block;
+    padding: 6px 8px;
+    border-radius: 6px;
+    font-size: 12px;
+    color: var(--cl-text);
+    background: var(--cl-surface);
+    user-select: all;
+  }
+  p code {
+    display: inline;
+    padding: 1px 5px;
+  }
+}
+
+.claude-empty,
+.claude-connect {
+  margin: auto;
+  text-align: center;
+  h3 {
+    margin: 10px 0 2px;
+    font-size: 17px;
+    font-weight: 600;
+  }
+  p {
+    margin: 0 0 14px;
+    font-size: 13px;
+    color: var(--cl-muted);
+  }
+  .claude-empty-logo {
+    display: inline-grid;
+    place-items: center;
+    width: 48px;
+    height: 48px;
+    border-radius: 14px;
+    color: var(--cl-accent-text);
+    background: var(--cl-accent);
+    animation: claude-float 3s ease-in-out infinite;
+  }
+}
+.claude-empty {
+  max-width: 440px;
+}
+.claude-connect {
+  max-width: 380px;
+}
+
+@keyframes claude-float {
+  50% {
+    transform: translateY(-4px) rotate(8deg);
+  }
+}
+
+.claude-suggestions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  button {
+    padding: 8px 10px;
+    border: 1px solid var(--cl-border);
+    border-radius: 10px;
+    text-align: left;
+    font: inherit;
+    font-size: 12.5px;
+    color: var(--cl-text);
+    background: var(--cl-surface);
+    cursor: pointer;
+    transition: border-color 0.15s, transform 0.15s;
+    &:hover:not(:disabled) {
+      border-color: var(--cl-accent);
+      transform: translateX(2px);
+    }
+  }
+}
+
+.claude-composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  margin: 0 12px 12px;
+  padding: 8px 8px 8px 12px;
+  border: 1px solid var(--cl-border);
+  border-radius: 14px;
+  background: var(--cl-raised);
+  transition: border-color 0.15s, box-shadow 0.15s;
+  &:focus-within {
+    border-color: var(--cl-accent);
+    box-shadow: 0 0 0 3px rgba(217, 119, 87, 0.22);
+  }
+  textarea {
+    flex: 1;
+    resize: none;
+    max-height: 140px;
+    min-height: 32px;
+    padding: 5px 0;
+    border: 0;
+    outline: none;
+    font: inherit;
+    font-size: 14px;
+    color: var(--cl-text);
+    background: transparent;
+    field-sizing: content;
+    &::placeholder {
+      color: var(--cl-muted);
+    }
+  }
+}
+
+@media (max-width: 640px) {
+  .claude-panel,
+  .claude-panel.wide {
+    width: 100%;
+  }
+  .claude-bar {
+    left: 12px;
+    width: calc(100% - 24px);
+    transform: none;
+    bottom: 72px;
+  }
+  .claude-stack,
+  .claude-dots {
+    display: none;
+  }
+}
+
+// sign-in to the user's own Claude account ------------------------------------
+
+.claude-primary {
+  padding: 9px 16px;
+  border: 0;
+  border-radius: 10px;
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--cl-accent-text);
+  background: var(--cl-accent);
+  cursor: pointer;
+  transition: transform 0.12s, opacity 0.12s;
+  &:hover:not(:disabled) {
+    transform: translateY(-1px);
+  }
+  &:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+}
+
+.claude-steps {
+  margin: 0;
+  padding-left: 18px;
+  text-align: left;
+  font-size: 13px;
+  line-height: 1.5;
+  li {
+    margin-bottom: 8px;
+  }
+  a {
+    color: var(--cl-accent);
+    font-weight: 600;
+  }
+  li:last-child {
+    display: flex;
+    gap: 6px;
+    margin-left: -18px;
+    input {
+      flex: 1;
+      min-width: 0;
+      padding: 8px 10px;
+      border: 1px solid var(--cl-border);
+      border-radius: 10px;
+      font: inherit;
+      color: var(--cl-text);
+      background: var(--cl-raised);
+      outline: none;
+      &:focus {
+        border-color: var(--cl-accent);
+      }
+    }
+  }
+}
+
+.claude-connect-error {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  color: var(--cl-error);
+  background: var(--cl-error-bg);
+}
+
+// bar extras: checkpoint stack, small icon buttons ------------------------------
+
+.claude-icon-btn {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 8px;
+  color: var(--cl-muted);
+  background: transparent;
+  cursor: pointer;
+  &:hover {
+    color: var(--cl-text);
+    background: var(--cl-surface);
+  }
+}
+
+// earlier prompts pile up to the left of the bar, blurred until hovered; each
+// one is a checkpoint the canvas can be rewound to
+.claude-stack {
+  position: absolute;
+  right: calc(100% + 34px);
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  width: max-content;
+  max-width: min(240px, 18vw);
+  pointer-events: none;
+}
+
+.claude-cp {
+  --depth: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  max-width: 100%;
+  padding: 5px 10px;
+  border: 1px solid var(--cl-border);
+  border-radius: 10px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--cl-text);
+  background: var(--cl-bg);
+  box-shadow: var(--cl-shadow);
+  cursor: pointer;
+  pointer-events: auto;
+  opacity: calc(0.9 - var(--depth) * 0.14);
+  filter: blur(calc(1.2px + var(--depth) * 0.5px));
+  transform: scale(calc(1 - var(--depth) * 0.04));
+  transform-origin: right bottom;
+  transition: filter 0.15s, opacity 0.15s, transform 0.15s, border-color 0.15s;
+  &:hover:not(:disabled) {
+    opacity: 1;
+    filter: none;
+    transform: scale(1);
+    border-color: var(--cl-accent);
+  }
+  &:disabled {
+    cursor: default;
+  }
+}
+.claude-cp-icon {
+  flex: none;
+  color: var(--cl-accent);
+}
+.claude-cp-text {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+// checkpoints: one small circle per prompt, the shown one is solid
+.claude-dots {
+  position: absolute;
+  right: calc(100% + 10px);
+  bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.claude-dot-cp {
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 2px solid var(--cl-accent);
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+  opacity: 0.4;
+  transition: opacity 0.15s, transform 0.15s, background 0.15s;
+  &.saved {
+    background: color-mix(in srgb, var(--cl-accent) 35%, transparent);
+  }
+  &:hover {
+    opacity: 0.85;
+    transform: scale(1.2);
+  }
+  &.active {
+    opacity: 1;
+    background: var(--cl-accent);
+    transform: scale(1.15);
+  }
+}
+
+// "⋯" menu on the shown checkpoint
+.claude-more {
+  position: relative;
+  flex: none;
+  align-self: center;
+  .claude-icon-btn {
+    width: 24px;
+    height: 20px;
+    font-size: 16px;
+    line-height: 1;
+  }
+}
+.claude-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 6px);
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  min-width: 220px;
+  padding: 4px;
+  border: 1px solid var(--cl-border);
+  border-radius: 10px;
+  background: var(--cl-bg);
+  box-shadow: var(--cl-shadow);
+  button {
+    padding: 7px 10px;
+    border: 0;
+    border-radius: 7px;
+    font: inherit;
+    font-size: 13px;
+    text-align: left;
+    color: var(--cl-text);
+    background: none;
+    cursor: pointer;
+    &:hover:not(:disabled) {
+      background: var(--cl-surface);
+    }
+    &:disabled {
+      opacity: 0.4;
+      cursor: default;
+    }
+    &.danger {
+      color: var(--cl-error);
+    }
+  }
+}
+
+// attachments -----------------------------------------------------------------
+
+.claude-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 0 12px 6px;
+}
+.claude-bar .claude-files {
+  padding: 0;
+}
+
+.claude-file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 4px 4px 0 0;
+  padding: 1px 8px;
+  border: 1px solid var(--cl-border);
+  border-radius: 999px;
+  font-size: 11.5px;
+  color: var(--cl-muted);
+  background: var(--cl-surface);
+  button {
+    padding: 0 2px;
+    border: 0;
+    color: inherit;
+    background: none;
+    cursor: pointer;
+  }
+}
+
+.claude-file-error {
+  align-self: center;
+  font-size: 12px;
+  color: var(--cl-error);
+}
+
+.claude-panel.dragging {
+  outline: 2px dashed var(--cl-accent);
+  outline-offset: -6px;
+}
+
+.claude-composer .claude-icon-btn {
+  align-self: flex-end;
+  margin-bottom: 2px;
+}
+
+.claude-restore {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  font: inherit;
+  font-size: 12px;
+  color: var(--cl-muted);
+  background: none;
+  cursor: pointer;
+  &:hover:not(:disabled) {
+    color: var(--cl-accent);
+  }
+  &:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+}
+
+// tabs: Chat / Logs / History, like Claude Code's ------------------------------
+
+.claude-tabs {
+  display: flex;
+  gap: 18px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--cl-border);
+  button {
+    position: relative;
+    padding: 8px 0;
+    border: 0;
+    font: inherit;
+    font-size: 13px;
+    color: var(--cl-muted);
+    background: none;
+    cursor: pointer;
+    &:hover {
+      color: var(--cl-text);
+    }
+    &.active {
+      color: var(--cl-text);
+      font-weight: 600;
+      &::after {
+        content: "";
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: -1px;
+        height: 2px;
+        background: var(--cl-accent);
+      }
+    }
+  }
+}
+.claude-tab-count {
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 400;
+  color: var(--cl-muted);
+  background: var(--cl-surface);
+}
+
+// logs: a terminal-style transcript ------------------------------------------
+
+.claude-logs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.claude-log-empty {
+  margin: auto;
+  max-width: 300px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--cl-muted);
+}
+.claude-log {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  summary {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    cursor: pointer;
+    list-style: none;
+    &::-webkit-details-marker {
+      display: none;
+    }
+  }
+  time {
+    flex: none;
+    color: var(--cl-muted);
+    opacity: 0.7;
+  }
+  .claude-log-mark {
+    flex: none;
+    width: 1em;
+    text-align: center;
+    color: var(--cl-muted);
+  }
+  .claude-log-body {
+    flex: 1;
+    min-width: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  &.user .claude-log-mark {
+    color: var(--cl-accent);
+  }
+  &.user .claude-log-body {
+    color: var(--cl-muted);
+  }
+  &.meta {
+    color: var(--cl-muted);
+  }
+  &.error {
+    color: var(--cl-error);
+    .claude-log-mark {
+      color: var(--cl-error);
+    }
+  }
+  &.thinking {
+    display: block;
+    color: var(--cl-muted);
+    font-style: italic;
+  }
+  &.tool {
+    display: block;
+    .claude-log-mark {
+      color: #3fa66b;
+    }
+    &.error .claude-log-mark {
+      color: var(--cl-error);
+    }
+    &.running .claude-log-mark {
+      color: var(--cl-accent);
+      animation: claude-blink 1s ease-in-out infinite;
+    }
+    .claude-log-body b {
+      font-weight: 600;
+    }
+  }
+  .claude-log-result {
+    display: block;
+    color: var(--cl-muted);
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .claude-log-elbow {
+    color: var(--cl-muted);
+  }
+  pre {
+    margin: 4px 0 4px 5.4em;
+    padding: 8px 10px;
+    max-height: 240px;
+    overflow: auto;
+    border: 1px solid var(--cl-border);
+    border-radius: 8px;
+    font: inherit;
+    font-size: 11.5px;
+    white-space: pre-wrap;
+    word-break: break-all;
+    background: var(--cl-raised);
+  }
+}
+
+@keyframes claude-blink {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+// history ---------------------------------------------------------------------
+
+.claude-history {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.claude-history-new,
+.claude-history-clear {
+  padding: 7px 10px;
+  border: 1px solid var(--cl-border);
+  border-radius: 10px;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  color: var(--cl-text);
+  background: var(--cl-surface);
+  cursor: pointer;
+  &:hover {
+    border-color: var(--cl-accent);
+  }
+}
+.claude-history-clear {
+  margin-top: 6px;
+  text-align: center;
+  color: var(--cl-error);
+}
+.claude-history-item {
+  display: flex;
+  align-items: center;
+  border-radius: 10px;
+  &:hover,
+  &.active {
+    background: var(--cl-surface);
+  }
+  > button:first-child {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    padding: 8px 10px;
+    border: 0;
+    font: inherit;
+    text-align: left;
+    color: var(--cl-text);
+    background: none;
+    cursor: pointer;
+  }
+}
+.claude-history-title {
+  overflow: hidden;
+  font-size: 13.5px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.claude-history-meta {
+  font-size: 11.5px;
+  color: var(--cl-muted);
+}
+.claude-history-delete {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 8px;
+  font-size: 16px;
+  color: var(--cl-muted);
+  background: none;
+  cursor: pointer;
+  &:hover {
+    color: var(--cl-error);
+  }
+}
+
+// steps: Drawing / Editing / tool calls -----------------------------------------
+
+.claude-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 5px 10px;
+  border: 1px solid var(--cl-border);
+  border-radius: 999px;
+  font-size: 12.5px;
+  color: var(--cl-muted);
+  background: var(--cl-surface);
+  animation: claude-rise 0.2s ease;
+  .claude-spinner {
+    font-size: 14px;
+  }
+  .claude-step-icon {
+    display: grid;
+    place-items: center;
+    width: 15px;
+    height: 15px;
+    border-radius: 50%;
+    font-size: 9px;
+    font-weight: 700;
+    color: #fff;
+    background: #3fa66b;
+  }
+  &.error {
+    color: var(--cl-error);
+    border-color: var(--cl-error-bg);
+    background: var(--cl-error-bg);
+    .claude-step-icon {
+      background: var(--cl-error);
+    }
+  }
+  .claude-step-label {
+    font-weight: 500;
+    color: var(--cl-text);
+  }
+  .claude-step-chip {
+    padding: 0 7px;
+    border-radius: 999px;
+    font-size: 11px;
+    background: var(--cl-bg);
+  }
+  .claude-step-time {
+    font-size: 11px;
+    opacity: 0.8;
+  }
+}
+
+// rendered markdown --------------------------------------------------------------
+
+.md {
+  font-size: 14px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  > :first-child {
+    margin-top: 0;
+  }
+  > :last-child {
+    margin-bottom: 0;
+  }
+  .md-p {
+    margin: 0 0 10px;
+  }
+  .md-heading {
+    margin: 16px 0 6px;
+    font-weight: 600;
+    line-height: 1.3;
+  }
+  h2.md-heading {
+    font-size: 16px;
+  }
+  h3.md-heading {
+    font-size: 15px;
+  }
+  h4.md-heading,
+  h5.md-heading,
+  h6.md-heading {
+    font-size: 14px;
+  }
+  a {
+    color: var(--cl-accent);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  strong {
+    font-weight: 600;
+  }
+  .md-list {
+    margin: 0 0 10px;
+    padding-left: 22px;
+    li {
+      margin: 3px 0;
+      padding-left: 2px;
+      > .md-list,
+      > .md-p {
+        margin: 4px 0;
+      }
+      &::marker {
+        color: var(--cl-muted);
+      }
+    }
+    .md-task {
+      list-style: none;
+      margin-left: -20px;
+      input {
+        margin: 0 7px 0 0;
+        accent-color: var(--cl-accent);
+        vertical-align: -1px;
+      }
+    }
+  }
+  .md-quote {
+    margin: 0 0 10px;
+    padding: 2px 0 2px 12px;
+    border-left: 3px solid var(--cl-border);
+    color: var(--cl-muted);
+  }
+  .md-hr {
+    margin: 14px 0;
+    border: 0;
+    border-top: 1px solid var(--cl-border);
+  }
+  .md-inline-code {
+    padding: 1px 5px;
+    border: 1px solid var(--cl-border);
+    border-radius: 5px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.88em;
+    background: var(--cl-surface);
+  }
+  .md-table-wrap {
+    margin: 0 0 10px;
+    overflow-x: auto;
+    border: 1px solid var(--cl-border);
+    border-radius: 8px;
+  }
+  .md-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    th,
+    td {
+      padding: 6px 10px;
+      border-bottom: 1px solid var(--cl-border);
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      font-weight: 600;
+      background: var(--cl-surface);
+    }
+    tr:last-child td {
+      border-bottom: 0;
+    }
+    td + td,
+    th + th {
+      border-left: 1px solid var(--cl-border);
+    }
+  }
+  .md-code {
+    margin: 0 0 10px;
+    overflow: hidden;
+    border: 1px solid var(--cl-border);
+    border-radius: 10px;
+    font-style: normal;
+    background: var(--cl-raised);
+    .md-code-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 4px 6px 4px 12px;
+      font-size: 11.5px;
+      color: var(--cl-muted);
+      background: var(--cl-surface);
+      border-bottom: 1px solid var(--cl-border);
+      button {
+        padding: 2px 8px;
+        border: 0;
+        border-radius: 6px;
+        font: inherit;
+        color: inherit;
+        background: none;
+        cursor: pointer;
+        &:hover {
+          color: var(--cl-text);
+          background: var(--cl-border);
+        }
+      }
+    }
+    pre {
+      margin: 0;
+      padding: 10px 12px;
+      overflow-x: auto;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12.5px;
+      line-height: 1.55;
+      tab-size: 2;
+      code {
+        font: inherit;
+      }
+    }
+    .tok-comment {
+      color: var(--cl-muted);
+      font-style: italic;
+    }
+    .tok-string {
+      color: #3f8f5b;
+    }
+    .tok-number {
+      color: #c2672f;
+    }
+    .tok-keyword {
+      color: #b4538a;
+    }
+  }
+}
+.theme-dark .md .md-code {
+  .tok-string {
+    color: #8bd0a0;
+  }
+  .tok-number {
+    color: #f0a56a;
+  }
+  .tok-keyword {
+    color: #e79ac6;
+  }
+}
+// the thinking text is muted and italic, but code inside it stays plain
+.claude-thinking-body.md {
+  font-size: 12.5px;
+  line-height: 1.5;
+}

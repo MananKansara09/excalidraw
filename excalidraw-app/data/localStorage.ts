@@ -10,9 +10,11 @@ import { STORAGE_KEYS } from "../app_constants";
 
 export const saveUsernameToLocalStorage = (username: string) => {
   try {
+    const existingRaw = localStorage.getItem(STORAGE_KEYS.LOCAL_STORAGE_COLLAB);
+    const existing = existingRaw ? JSON.parse(existingRaw) : {};
     localStorage.setItem(
       STORAGE_KEYS.LOCAL_STORAGE_COLLAB,
-      JSON.stringify({ username }),
+      JSON.stringify({ ...existing, username }),
     );
   } catch (error: any) {
     // Unable to access window.localStorage
