@@ -8,7 +8,9 @@ import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 
 import { goToSignIn } from "../../plus/auth";
 
+import { ClaudeLogo } from "./ClaudeLogo";
 import { HistoryView, LogsView, formatSize } from "./ClaudeViews";
+import { Markdown } from "./Markdown";
 import {
   disconnect,
   getStatus,
@@ -22,7 +24,7 @@ import { applyOp, summarizeScene } from "./sceneOps";
 import "./ClaudePanel.scss";
 
 import type { BridgeStatus } from "./claudeBridge";
-import type { Chat, LogBody, LogEvent, Message } from "./history";
+import type { Chat, LogBody, LogEvent, Message, ToolCall } from "./history";
 
 type Mode = "bar" | "panel";
 type View = "chat" | "logs" | "history";
@@ -99,27 +101,7 @@ const readFileAsBase64 = (file: File): Promise<string> =>
 
 /** the Claude starburst */
 const ClaudeMark = ({ size = 18 }: { size?: number }) => (
-  <svg
-    viewBox="0 0 24 24"
-    width={size}
-    height={size}
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2.2"
-    strokeLinecap="round"
-    aria-hidden
-  >
-    {[0, 45, 90, 135, 180, 225, 270, 315].map((deg, i) => (
-      <line
-        key={deg}
-        x1="12"
-        y1={i % 2 ? 6.5 : 4}
-        x2="12"
-        y2="10"
-        transform={`rotate(${deg} 12 12)`}
-      />
-    ))}
-  </svg>
+  <ClaudeLogo size={size} />
 );
 
 const SPINNER_FRAMES = ["·", "✢", "✳", "✶", "✻", "✽", "✻", "✶", "✳", "✢"];
@@ -135,6 +117,18 @@ const Spinner = () => {
     return () => window.clearInterval(id);
   }, []);
   return <span className="claude-spinner">{SPINNER_FRAMES[frame]}</span>;
+};
+
+const patchCall = (
+  calls: ToolCall[] | undefined,
+  match: (c: ToolCall) => boolean,
+  patch: Partial<ToolCall>,
+): ToolCall[] | undefined => {
+  const index = calls ? calls.findLastIndex(match) : -1;
+  if (!calls || index === -1) {
+    return calls;
+  }
+  return calls.map((c, i) => (i === index ? { ...c, ...patch } : c));
 };
 
 const oneLine = (text: string) => text.replace(/\s+/g, " ").trim();
@@ -226,6 +220,47 @@ const ConnectCard = ({ onConnected }: { onConnected: () => void }) => {
   );
 };
 
+/** one step of Claude's work: "Drawing · 12 elements", with its outcome */
+const ToolCard = ({
+  name,
+  call,
+  live,
+}: {
+  name: string;
+  call?: ToolCall;
+  live: boolean;
+}) => {
+  const label = TOOL_LABELS[name] || name.replace(/^mcp__\w+__/, "");
+  const status = call?.status ?? (live ? "running" : "done");
+  const running = live && status === "running";
+  const detail =
+    call?.count !== undefined
+      ? `${call.count} element${call.count === 1 ? "" : "s"}`
+      : null;
+  return (
+    <div className={clsx("claude-step", status)}>
+      {running ? (
+        <Spinner />
+      ) : (
+        <span className="claude-step-icon" aria-hidden>
+          {status === "error" ? "✕" : "✓"}
+        </span>
+      )}
+      <span
+        className={clsx("claude-step-label", { "claude-shimmer": running })}
+      >
+        {running ? `${label}…` : label}
+      </span>
+      {detail && <span className="claude-step-chip">{detail}</span>}
+      {call?.durationMs !== undefined && !running && (
+        <span className="claude-step-time">
+          {(call.durationMs / 1000).toFixed(1)}s
+        </span>
+      )}
+    </div>
+  );
+};
+
 const ThinkingBlock = ({
   message,
   live,
@@ -252,7 +287,10 @@ const ThinkingBlock = ({
         </span>
       </button>
       {(expanded || live) && (
-        <div className="claude-thinking-body">{message.thinking.trim()}</div>
+        <Markdown
+          className="claude-thinking-body"
+          text={message.thinking.trim()}
+        />
       )}
     </div>
   );
@@ -544,18 +582,46 @@ export const ClaudePanel = ({
             patchLast((m) => ({
               ...endThinking(m),
               tools: [...m.tools, name],
+              toolCalls: [
+                ...(m.toolCalls ?? []),
+                { name, status: "running", startedAt: Date.now() },
+              ],
             }));
           },
-          onToolUse: ({ id, name, input }) =>
+          onToolUse: ({ id, name, input }) => {
             patchTool((e) => e.name === name && !e.toolId, {
               toolId: id,
               input,
-            }),
-          onToolResult: ({ id, output, isError }) =>
+            });
+            const i = input as any;
+            const count =
+              i?.elements?.length ?? i?.updates?.length ?? i?.ids?.length;
+            patchLast((m) => ({
+              ...m,
+              toolCalls: patchCall(
+                m.toolCalls,
+                (c) => c.name === name && !c.toolId,
+                { toolId: id, count },
+              ),
+            }));
+          },
+          onToolResult: ({ id, output, isError }) => {
             patchTool((e) => e.toolId === id, {
               output,
               status: isError ? "error" : "done",
-            }),
+            });
+            patchLast((m) => ({
+              ...m,
+              toolCalls: patchCall(m.toolCalls, (c) => c.toolId === id, {
+                status: isError ? "error" : "done",
+                result: output?.split("\n")[0].slice(0, 200),
+                durationMs:
+                  Date.now() -
+                  (m.toolCalls?.find((c) => c.toolId === id)?.startedAt ??
+                    Date.now()),
+              }),
+            }));
+          },
           onOps: (op) => {
             applyOp(excalidrawAPI, op);
             const count =
@@ -606,6 +672,12 @@ export const ClaudePanel = ({
     }
     // a tool call cut off by an error or Stop is not still running
     patchTool((e) => e.status === "running", { status: "error" });
+    patchLast((m) => ({
+      ...m,
+      toolCalls: m.toolCalls?.map((c) =>
+        c.status === "running" ? { ...c, status: "error" } : c,
+      ),
+    }));
     abortRef.current = null;
     setBusy(false);
   };
@@ -1232,24 +1304,25 @@ export const ClaudePanel = ({
                         const toolLive =
                           live && j === m.tools.length - 1 && !m.text;
                         return (
-                          <div key={j} className="claude-tool">
-                            {toolLive ? (
-                              <Spinner />
-                            ) : (
-                              <span className="claude-dot ok">●</span>
-                            )}
-                            <span
-                              className={clsx({ "claude-shimmer": toolLive })}
-                            >
-                              {TOOL_LABELS[t] || t}
-                            </span>
-                          </div>
+                          <ToolCard
+                            key={j}
+                            name={t}
+                            call={m.toolCalls?.[j]}
+                            live={toolLive}
+                          />
                         );
                       })}
                       {m.text && (
                         <div className="claude-reply">
                           <span className="claude-dot">●</span>
-                          <div className="claude-reply-text">{m.text}</div>
+                          {m.error ? (
+                            <div className="claude-reply-text">{m.text}</div>
+                          ) : (
+                            <Markdown
+                              className="claude-reply-text"
+                              text={m.text}
+                            />
+                          )}
                         </div>
                       )}
                       {live && !m.text && !m.tools.length && !thinkingLive && (

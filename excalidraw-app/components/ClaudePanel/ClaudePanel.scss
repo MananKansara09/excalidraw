@@ -38,11 +38,13 @@
   width: 26px;
   height: 26px;
   border-radius: 8px;
+  box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.12);
   color: var(--cl-accent-text);
   background: var(--cl-accent);
   &.lg {
-    width: 30px;
-    height: 30px;
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
   }
 }
 
@@ -267,7 +269,7 @@
   width: 32px;
   height: 32px;
   border: 0;
-  border-radius: 9px;
+  border-radius: 50%;
   color: var(--cl-accent-text);
   background: var(--cl-accent);
   cursor: pointer;
@@ -420,7 +422,6 @@
   .claude-reply-text {
     flex: 1;
     min-width: 0;
-    white-space: pre-wrap;
     word-break: break-word;
   }
 }
@@ -468,7 +469,6 @@
     overflow-y: auto;
     border-left: 2px solid var(--cl-border);
     font-style: italic;
-    white-space: pre-wrap;
     word-break: break-word;
     animation: claude-rise 0.15s ease;
   }
@@ -1129,4 +1129,242 @@
   &:hover {
     color: var(--cl-error);
   }
+}
+
+// steps: Drawing / Editing / tool calls -----------------------------------------
+
+.claude-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 5px 10px;
+  border: 1px solid var(--cl-border);
+  border-radius: 999px;
+  font-size: 12.5px;
+  color: var(--cl-muted);
+  background: var(--cl-surface);
+  animation: claude-rise 0.2s ease;
+  .claude-spinner {
+    font-size: 14px;
+  }
+  .claude-step-icon {
+    display: grid;
+    place-items: center;
+    width: 15px;
+    height: 15px;
+    border-radius: 50%;
+    font-size: 9px;
+    font-weight: 700;
+    color: #fff;
+    background: #3fa66b;
+  }
+  &.error {
+    color: var(--cl-error);
+    border-color: var(--cl-error-bg);
+    background: var(--cl-error-bg);
+    .claude-step-icon {
+      background: var(--cl-error);
+    }
+  }
+  .claude-step-label {
+    font-weight: 500;
+    color: var(--cl-text);
+  }
+  .claude-step-chip {
+    padding: 0 7px;
+    border-radius: 999px;
+    font-size: 11px;
+    background: var(--cl-bg);
+  }
+  .claude-step-time {
+    font-size: 11px;
+    opacity: 0.8;
+  }
+}
+
+// rendered markdown --------------------------------------------------------------
+
+.md {
+  font-size: 14px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  > :first-child {
+    margin-top: 0;
+  }
+  > :last-child {
+    margin-bottom: 0;
+  }
+  .md-p {
+    margin: 0 0 10px;
+  }
+  .md-heading {
+    margin: 16px 0 6px;
+    font-weight: 600;
+    line-height: 1.3;
+  }
+  h2.md-heading {
+    font-size: 16px;
+  }
+  h3.md-heading {
+    font-size: 15px;
+  }
+  h4.md-heading,
+  h5.md-heading,
+  h6.md-heading {
+    font-size: 14px;
+  }
+  a {
+    color: var(--cl-accent);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  strong {
+    font-weight: 600;
+  }
+  .md-list {
+    margin: 0 0 10px;
+    padding-left: 22px;
+    li {
+      margin: 3px 0;
+      padding-left: 2px;
+      > .md-list,
+      > .md-p {
+        margin: 4px 0;
+      }
+      &::marker {
+        color: var(--cl-muted);
+      }
+    }
+    .md-task {
+      list-style: none;
+      margin-left: -20px;
+      input {
+        margin: 0 7px 0 0;
+        accent-color: var(--cl-accent);
+        vertical-align: -1px;
+      }
+    }
+  }
+  .md-quote {
+    margin: 0 0 10px;
+    padding: 2px 0 2px 12px;
+    border-left: 3px solid var(--cl-border);
+    color: var(--cl-muted);
+  }
+  .md-hr {
+    margin: 14px 0;
+    border: 0;
+    border-top: 1px solid var(--cl-border);
+  }
+  .md-inline-code {
+    padding: 1px 5px;
+    border: 1px solid var(--cl-border);
+    border-radius: 5px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.88em;
+    background: var(--cl-surface);
+  }
+  .md-table-wrap {
+    margin: 0 0 10px;
+    overflow-x: auto;
+    border: 1px solid var(--cl-border);
+    border-radius: 8px;
+  }
+  .md-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    th,
+    td {
+      padding: 6px 10px;
+      border-bottom: 1px solid var(--cl-border);
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      font-weight: 600;
+      background: var(--cl-surface);
+    }
+    tr:last-child td {
+      border-bottom: 0;
+    }
+    td + td,
+    th + th {
+      border-left: 1px solid var(--cl-border);
+    }
+  }
+  .md-code {
+    margin: 0 0 10px;
+    overflow: hidden;
+    border: 1px solid var(--cl-border);
+    border-radius: 10px;
+    font-style: normal;
+    background: var(--cl-raised);
+    .md-code-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 4px 6px 4px 12px;
+      font-size: 11.5px;
+      color: var(--cl-muted);
+      background: var(--cl-surface);
+      border-bottom: 1px solid var(--cl-border);
+      button {
+        padding: 2px 8px;
+        border: 0;
+        border-radius: 6px;
+        font: inherit;
+        color: inherit;
+        background: none;
+        cursor: pointer;
+        &:hover {
+          color: var(--cl-text);
+          background: var(--cl-border);
+        }
+      }
+    }
+    pre {
+      margin: 0;
+      padding: 10px 12px;
+      overflow-x: auto;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12.5px;
+      line-height: 1.55;
+      tab-size: 2;
+      code {
+        font: inherit;
+      }
+    }
+    .tok-comment {
+      color: var(--cl-muted);
+      font-style: italic;
+    }
+    .tok-string {
+      color: #3f8f5b;
+    }
+    .tok-number {
+      color: #c2672f;
+    }
+    .tok-keyword {
+      color: #b4538a;
+    }
+  }
+}
+.theme-dark .md .md-code {
+  .tok-string {
+    color: #8bd0a0;
+  }
+  .tok-number {
+    color: #f0a56a;
+  }
+  .tok-keyword {
+    color: #e79ac6;
+  }
+}
+// the thinking text is muted and italic, but code inside it stays plain
+.claude-thinking-body.md {
+  font-size: 12.5px;
+  line-height: 1.5;
 }

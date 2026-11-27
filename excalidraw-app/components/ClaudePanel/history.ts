@@ -2,6 +2,18 @@
 
 export type ChatFile = { name: string; size: number };
 
+export type ToolCall = {
+  name: string;
+  toolId?: string;
+  status: "running" | "done" | "error";
+  /** how many elements the call touched, when known */
+  count?: number;
+  /** first line of the tool's result */
+  result?: string;
+  startedAt: number;
+  durationMs?: number;
+};
+
 export type Message = {
   id: number;
   role: "user" | "assistant";
@@ -11,6 +23,8 @@ export type Message = {
   thinkingMs?: number;
   thinkingStart?: number;
   tools: string[];
+  /** per-step detail shown on the tool cards (older saved chats don't have it) */
+  toolCalls?: ToolCall[];
   files?: ChatFile[];
   error?: boolean;
 };
