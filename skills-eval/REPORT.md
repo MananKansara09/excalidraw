@@ -65,6 +65,24 @@ The crossing check covers arrows only; the run without skills has a loop drawn a
 | --------------------------- | --------------------------------- |
 | ![with](out/with-turn3.png) | ![without](out/without-turn3.png) |
 
+## After the fixes
+
+The app bug is fixed and the Excalidraw skill now requires attached, labelled arrows. One new run with skills ([scene](out/atlas-with-skills-fixed.excalidraw)). The sections above describe the runs before the fixes.
+
+| Measure | With, before | Without, before | With, after |
+| --- | --- | --- | --- |
+| Arrows attached to both shapes | 12 of 42 | 32 of 35 | 48 of 48 |
+| Arrows with attached labels | 0 | 8 | 15 |
+| Arrows crossing an unrelated shape | 3 | 0 | 0 |
+| Items spilling out of a frame | 1 | 0 | 0 |
+| Output tokens | 19,970 | 13,469 | 19,976 |
+
+Still visible: in the execution flow, the label "no" hides most of its short arrow, and slides 1 and 4 sit slightly out of line.
+
+| Architecture | Technical documents | Client slides |
+| --- | --- | --- |
+| ![architecture](out/after-turn1.png) | ![documents](out/after-turn2.png) | ![slides](out/after-turn3.png) |
+
 ## Run it again
 
 ```bash

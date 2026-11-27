@@ -33,6 +33,7 @@ import type { RenderEnvironment } from "../renderEnvironment";
 
 import type {
   ExcalidrawArrowElement,
+  ExcalidrawLinearElement,
   ExcalidrawStickyNoteElement,
   ExcalidrawTextElement,
   ExcalidrawTextElementWithContainer,
@@ -2100,5 +2101,43 @@ describe("Test Transform", () => {
 
     wrapTextSpy.mockRestore();
     measureTextSpy.mockRestore();
+  });
+
+  describe("vertical linear elements", () => {
+    it.each(["arrow", "line"] as const)(
+      "should keep a vertical %s vertical",
+      (type) => {
+        const [element] = convertToExcalidrawElements([
+          { type, x: 10, y: 20, width: 0, height: -120 },
+        ]);
+
+        expect(element.width).toBe(0);
+        expect((element as ExcalidrawLinearElement).points).toEqual([
+          [0, 0],
+          [0, -120],
+        ]);
+      },
+    );
+
+    it("should keep an arrow bound to vertically aligned shapes vertical", () => {
+      const arrow = convertToExcalidrawElements(
+        [
+          { type: "rectangle", id: "a", x: 0, y: 0, width: 160, height: 70 },
+          { type: "ellipse", id: "b", x: 0, y: 200, width: 160, height: 70 },
+          {
+            type: "arrow",
+            x: 80,
+            y: 70,
+            width: 0,
+            height: 130,
+            start: { id: "a" },
+            end: { id: "b" },
+          },
+        ],
+        { regenerateIds: false },
+      ).find((element) => element.type === "arrow")!;
+
+      expect(arrow.width).toBeLessThan(1);
+    });
   });
 });

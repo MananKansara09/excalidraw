@@ -287,6 +287,19 @@ const DEFAULT_LINEAR_ELEMENT_PROPS = {
 
 const DEFAULT_DIMENSION = 100;
 
+/** a zero width is kept when there is a height: the element is vertical */
+const getLinearSize = ({
+  width,
+  height,
+}: {
+  width?: number;
+  height?: number;
+}) => ({
+  width:
+    width === 0 && height ? 0 : width || DEFAULT_LINEAR_ELEMENT_PROPS.width,
+  height: height || DEFAULT_LINEAR_ELEMENT_PROPS.height,
+});
+
 const bindTextToContainer = (
   container: ExcalidrawElement,
   textProps: { text: string } & FragmentConstructorOpts &
@@ -721,8 +734,7 @@ export const convertToExcalidrawElements = (
         break;
       }
       case "line": {
-        const width = element.width || DEFAULT_LINEAR_ELEMENT_PROPS.width;
-        const height = element.height || DEFAULT_LINEAR_ELEMENT_PROPS.height;
+        const { width, height } = getLinearSize(element);
         excalidrawElement = newLinearElement({
           width,
           height,
@@ -733,8 +745,7 @@ export const convertToExcalidrawElements = (
         break;
       }
       case "arrow": {
-        const width = element.width || DEFAULT_LINEAR_ELEMENT_PROPS.width;
-        const height = element.height || DEFAULT_LINEAR_ELEMENT_PROPS.height;
+        const { width, height } = getLinearSize(element);
         excalidrawElement = newArrowElement({
           width,
           height,
