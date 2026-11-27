@@ -32,7 +32,9 @@ import {
 import { z } from "zod";
 import {
   buildUserContent,
+  isModelId,
   MAX_CHAT_BODY,
+  toModelChoices,
   translateMessage,
   validateAttachments,
 } from "./chat.mjs";
@@ -268,9 +270,52 @@ const getStatus = async (user) => {
     return {
       loggedIn: !!json.loggedIn,
       email: json.email || json.account?.email || null,
+      plan: json.subscriptionType || null,
     };
   } catch {
-    return { loggedIn: false, email: null };
+    return { loggedIn: false, email: null, plan: null };
+  }
+};
+
+const MODELS_TTL = 10 * 60 * 1000;
+const modelCache = new Map(); // userId -> { at, models }
+
+/**
+ * The models this user's account offers, as Claude Code's own picker lists
+ * them. Only asks the CLI; no prompt is sent, so it uses none of the plan.
+ */
+const listModels = async (user) => {
+  const cached = modelCache.get(user.id);
+  if (cached && Date.now() - cached.at < MODELS_TTL) {
+    return cached.models;
+  }
+  let end;
+  const ended = new Promise((resolve) => (end = resolve));
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), 30000);
+  let session;
+  try {
+    session = query({
+      // an input stream that sends nothing keeps the CLI up for the question
+      prompt: (async function* () {
+        await ended;
+      })(),
+      options: {
+        abortController: abort,
+        cwd: user.workDir,
+        env: cliEnv(user),
+        pathToClaudeCodeExecutable: CLAUDE_BIN || undefined,
+        settingSources: [],
+        tools: [],
+      },
+    });
+    const models = toModelChoices(await session.supportedModels());
+    modelCache.set(user.id, { at: Date.now(), models });
+    return models;
+  } finally {
+    clearTimeout(timer);
+    end();
+    session?.close();
   }
 };
 
@@ -384,6 +429,9 @@ const handleChat = async (req, res, user) => {
   if (typeof message !== "string" || !message.trim()) {
     return sendJson(res, 400, { error: "message is required" });
   }
+  if (model !== undefined && !isModelId(model)) {
+    return sendJson(res, 400, { error: "Unknown model" });
+  }
   if (activeUsers.has(user.id)) {
     return sendJson(res, 429, {
       error: "Claude is still answering your previous message.",
@@ -449,7 +497,8 @@ const handleChat = async (req, res, user) => {
         cwd: user.workDir,
         env: cliEnv(user),
         pathToClaudeCodeExecutable: CLAUDE_BIN || undefined,
-        model: model || undefined,
+        // "default" means: whatever the account's default is
+        model: model === "default" ? undefined : model,
         resume: sessionId || undefined,
         systemPrompt: SYSTEM_PROMPT,
         settingSources: [],
@@ -492,6 +541,8 @@ const friendlyError = (code, detail) => {
         : "Claude Code isn't signed in on this machine. Run `claude login` in a terminal, then try again.";
     case "rate_limit":
       return "Your Claude plan's usage limit was reached. Try again later.";
+    case "model_not_found":
+      return "Your Claude plan can't use this model. Pick another one.";
     case "billing_error":
     case "account_on_hold":
       return "There is a problem with your Claude account or plan.";
@@ -536,6 +587,14 @@ const server = http.createServer(async (req, res) => {
         ...(await getStatus(user)),
       });
     }
+    if (req.method === "GET" && url.pathname === `${PREFIX}/models`) {
+      try {
+        return sendJson(res, 200, { models: await listModels(user) });
+      } catch (e) {
+        console.error("models:", e?.message || e);
+        return sendJson(res, 500, { error: "Couldn't load the model list." });
+      }
+    }
     if (req.method === "POST" && url.pathname === `${PREFIX}/auth/login`) {
       try {
         return sendJson(res, 200, { url: await startLogin(user) });
@@ -559,6 +618,7 @@ const server = http.createServer(async (req, res) => {
         });
       }
       const result = await submitCode(user, code);
+      modelCache.delete(user.id);
       return sendJson(
         res,
         result.ok ? 200 : 400,
@@ -568,6 +628,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && url.pathname === `${PREFIX}/auth/logout`) {
       killLogin(user.id);
       await runCli(user, ["auth", "logout"]);
+      modelCache.delete(user.id);
       return sendJson(res, 200, { loggedIn: false });
     }
     if (req.method === "POST" && url.pathname === `${PREFIX}/chat`) {

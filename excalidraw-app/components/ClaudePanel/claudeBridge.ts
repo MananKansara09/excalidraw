@@ -41,7 +41,13 @@ type Handlers = {
 const BASE = "/claude-bridge";
 
 export type BridgeStatus =
-  | { state: "ok"; loggedIn: boolean; email: string | null }
+  | {
+      state: "ok";
+      loggedIn: boolean;
+      email: string | null;
+      /** subscription tier, e.g. "pro" or "max" */
+      plan?: string | null;
+    }
   | { state: "signin_required" }
   | { state: "offline" };
 
@@ -75,9 +81,27 @@ export const getStatus = async (): Promise<BridgeStatus> => {
       state: "ok",
       loggedIn: !!json.loggedIn,
       email: json.email ?? null,
+      plan: json.plan ?? null,
     };
   } catch {
     return { state: "offline" };
+  }
+};
+
+export type ModelChoice = {
+  value: string;
+  name: string;
+  description: string;
+};
+
+/** the models the connected account can use; empty when they can't be read */
+export const getModels = async (): Promise<ModelChoice[]> => {
+  try {
+    const res = await fetch(`${BASE}/models`, { cache: "no-store" });
+    const json = res.ok ? await res.json() : null;
+    return Array.isArray(json?.models) ? json.models : [];
+  } catch {
+    return [];
   }
 };
 
@@ -107,6 +131,7 @@ export const streamChat = async (
   body: {
     message: string;
     sessionId?: string;
+    model?: string;
     scene: SceneSummary;
     attachments?: AttachmentPayload[];
   },

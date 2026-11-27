@@ -13,6 +13,10 @@ yarn start                   # the app; /claude-bridge is proxied by Vite
 - `ANTHROPIC_API_KEY` is ignored so the subscription is used (set `CLAUDE_BRIDGE_ALLOW_API_KEY=1` to opt out).
 - Only `http://localhost:3000` and `http://localhost:3001` (the port in `.env.development`) may call it; set `CLAUDE_BRIDGE_ORIGINS` (comma-separated) if the app runs elsewhere, and `CLAUDE_BRIDGE_PORT` / `VITE_APP_CLAUDE_BRIDGE_URL` to change the port.
 
+## Models
+
+- `GET /models` returns the models the signed-in account offers (the list Claude Code's `/model` picker shows); the panel sends the chosen one as `model` with each `POST /chat`. Asking for the list sends no prompt. It is cached for 10 minutes and dropped on sign-in or sign-out.
+
 ## Attachments and logs
 
 - `POST /chat` accepts `attachments: [{ name, mediaType, data }]` (base64): up to 5 files, **5 MB each**. PDFs and images go to Claude as document/image blocks; text files (txt, md, csv, json, code…) are inlined. Word/Excel files must be exported to PDF/CSV first. Claude still gets no file or shell tools.

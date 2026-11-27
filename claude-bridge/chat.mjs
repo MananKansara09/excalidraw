@@ -106,6 +106,32 @@ export const buildUserContent = (promptText, attachments) => {
   return blocks;
 };
 
+const MODEL_ID = /^[a-zA-Z0-9][\w.:/[\]-]{0,99}$/;
+export const isModelId = (value) =>
+  typeof value === "string" && MODEL_ID.test(value);
+
+/**
+ * The Agent SDK's model list as picker rows. Per-token prices are dropped:
+ * the panel runs on the user's subscription.
+ */
+export const toModelChoices = (models) =>
+  (Array.isArray(models) ? models : [])
+    .filter((m) => isModelId(m?.value))
+    .map((m) => {
+      const parts = String(m.description || "")
+        .split(" · ")
+        .filter((part) => part && !part.includes("per Mtok"));
+      const title = String(m.displayName || m.value);
+      // "Opus 5.5 · Best for …": the versioned name makes the better title
+      const name =
+        m.value === "default"
+          ? "Default"
+          : parts[0]?.startsWith(title)
+          ? parts.shift()
+          : title;
+      return { value: m.value, name, description: parts.join(" · ") };
+    });
+
 const stripToolPrefix = (name) =>
   String(name).replace(/^mcp__excalidraw__/, "");
 

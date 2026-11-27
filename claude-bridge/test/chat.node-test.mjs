@@ -6,6 +6,8 @@ import {
   MAX_ATTACHMENT_BYTES,
   translateMessage,
   validateAttachments,
+  isModelId,
+  toModelChoices,
 } from "../chat.mjs";
 
 const b64 = (value) => Buffer.from(value).toString("base64");
@@ -211,4 +213,36 @@ describe("message translation", () => {
     );
     assert.equal(events[0][1].message, "friendly:rate_limit:");
   });
+});
+
+test("model list becomes picker rows without per-token prices", () => {
+  assert.deepEqual(
+    toModelChoices([
+      {
+        value: "default",
+        displayName: "Default (recommended)",
+        description: "Use the default model · $4/$20 per Mtok",
+      },
+      {
+        value: "opus",
+        displayName: "Opus",
+        description: "Opus 5.5 · Best for complex tasks · $4/$20 per Mtok",
+      },
+      { value: "--bad flag" },
+    ]),
+    [
+      {
+        value: "default",
+        name: "Default",
+        description: "Use the default model",
+      },
+      {
+        value: "opus",
+        name: "Opus 5.5",
+        description: "Best for complex tasks",
+      },
+    ],
+  );
+  assert.equal(isModelId("claude-fable-5-2[1m]"), true);
+  assert.equal(isModelId("--flag"), false);
 });

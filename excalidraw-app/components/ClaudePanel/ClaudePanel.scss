@@ -1108,6 +1108,121 @@ $serif: ui-serif, "Iowan Old Style", "Palatino Linotype", Georgia, serif;
   }
 }
 
+// model picker, sitting on top of the message box -------------------------------
+
+.claude-model {
+  position: relative;
+  align-self: flex-start;
+  max-width: 100%;
+}
+.claude-root .claude-model-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--cl-text);
+  @include glass(var(--cl-glass-strong), 16px);
+  box-shadow: var(--cl-shine), var(--cl-shadow);
+  &:hover,
+  &[aria-expanded="true"] {
+    border-color: var(--cl-accent);
+  }
+  .claude-logo {
+    flex: none;
+    color: var(--cl-accent);
+  }
+  span {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  > svg:last-child {
+    flex: none;
+    width: 12px;
+    height: 12px;
+    color: var(--cl-muted);
+  }
+}
+.claude-model-menu {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 6px);
+  z-index: 7;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: min(300px, calc(100vw - 40px));
+  max-height: min(380px, 55vh);
+  overflow: hidden auto;
+  padding: 5px;
+  border: 1px solid var(--cl-rim);
+  border-radius: 16px;
+  // solid: text behind a menu must not show through
+  background: var(--cl-bg);
+  box-shadow: var(--cl-shine), var(--cl-float);
+  animation: claude-rise 0.16s ease;
+  @include no-scrollbar;
+}
+.claude-model-title {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px 5px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--cl-muted);
+  em {
+    font-style: normal;
+    text-transform: capitalize;
+    color: var(--cl-accent);
+  }
+}
+.claude-root .claude-model-option {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 16px;
+  align-items: center;
+  column-gap: 8px;
+  flex: none;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 10px;
+  text-align: left;
+  color: var(--cl-text);
+  background: transparent;
+  &:hover,
+  &:focus-visible {
+    background: var(--cl-surface);
+  }
+  strong {
+    font-size: 13px;
+    font-weight: 600;
+  }
+  small {
+    grid-column: 1;
+    font-size: 11.5px;
+    line-height: 1.4;
+    color: var(--cl-muted);
+  }
+  svg {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    color: var(--cl-accent);
+  }
+}
+.claude-model-note {
+  margin: 0;
+  padding: 4px 10px 10px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--cl-muted);
+}
+
 // bar extras: chat stack, checkpoint circles, "⋯" menu ----------------------------
 
 // earlier chats pile up to the left of the bar, blurred until hovered

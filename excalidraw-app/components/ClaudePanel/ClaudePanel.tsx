@@ -11,8 +11,10 @@ import { goToSignIn } from "../../plus/auth";
 import { ClaudeLogo } from "./ClaudeLogo";
 import { HistoryView, LogsView, formatSize } from "./ClaudeViews";
 import { Markdown } from "./Markdown";
+import { ModelPicker } from "./ModelPicker";
 import {
   disconnect,
+  getModels,
   getStatus,
   startLogin,
   streamChat,
@@ -23,7 +25,7 @@ import { applyOp, summarizeScene } from "./sceneOps";
 
 import "./ClaudePanel.scss";
 
-import type { BridgeStatus } from "./claudeBridge";
+import type { BridgeStatus, ModelChoice } from "./claudeBridge";
 import type { Chat, LogBody, LogEvent, Message, ToolCall } from "./history";
 
 type Mode = "bar" | "panel";
@@ -87,16 +89,19 @@ const TOOL_LABELS: Record<string, string> = {
   clear_canvas: "Clearing canvas",
 };
 
-const loadPrefs = (): { open: boolean; wide: boolean; mode: Mode } => {
+type Prefs = { open: boolean; wide: boolean; mode: Mode; model: string };
+
+const loadPrefs = (): Prefs => {
   try {
     const raw = JSON.parse(localStorage.getItem(PREFS_KEY) || "{}");
     return {
       open: !!raw.open,
       wide: !!raw.wide,
       mode: raw.mode === "panel" ? "panel" : "bar",
+      model: typeof raw.model === "string" ? raw.model : "default",
     };
   } catch {
-    return { open: false, wide: false, mode: "bar" };
+    return { open: false, wide: false, mode: "bar", model: "default" };
   }
 };
 
@@ -444,6 +449,10 @@ export const ClaudePanel = ({
   const ready = status?.state === "ok" && status.loggedIn;
   const owner =
     ready && status.state === "ok" ? status.email || "claude" : null;
+  const plan = status?.state === "ok" ? status.plan : null;
+  const [models, setModels] = useState<ModelChoice[]>([]);
+  // a saved choice this account doesn't offer falls back to the first
+  const model = models.find((m) => m.value === prefs.model) ?? models[0];
   const sessionId = useRef<string | undefined>(undefined);
   const abortRef = useRef<AbortController | null>(null);
   const nextId = useRef(1);
@@ -486,6 +495,19 @@ export const ClaudePanel = ({
       window.clearInterval(id);
     };
   }, [status]);
+
+  // each account has its own model list
+  useEffect(() => {
+    setModels([]);
+    if (!owner) {
+      return;
+    }
+    let cancelled = false;
+    getModels().then((next) => !cancelled && setModels(next));
+    return () => {
+      cancelled = true;
+    };
+  }, [owner]);
 
   const scrollToLatest = useCallback(() => {
     stickRef.current = true;
@@ -717,6 +739,7 @@ export const ClaudePanel = ({
         {
           message,
           sessionId: sessionId.current,
+          model: model?.value,
           scene: summarizeScene(excalidrawAPI),
           attachments,
         },
@@ -1031,6 +1054,23 @@ export const ClaudePanel = ({
     </button>
   );
 
+  const modelPicker = (
+    <ModelPicker
+      models={models}
+      selected={model}
+      connected={!!ready}
+      plan={ready ? plan : null}
+      onSelect={(value) => {
+        updatePrefs({ model: value });
+        inputRef.current?.focus();
+      }}
+      onConnect={() => {
+        setView("chat");
+        updatePrefs({ open: true, mode: "panel" });
+      }}
+    />
+  );
+
   const dropProps = {
     onDragOver: (e: React.DragEvent) => {
       if (e.dataTransfer.types.includes("Files")) {
@@ -1230,6 +1270,7 @@ export const ClaudePanel = ({
             </div>
           )}
           {fileChips}
+          {modelPicker}
           <form
             className="claude-bar-input"
             onSubmit={(e) => {
@@ -1541,6 +1582,7 @@ export const ClaudePanel = ({
                 </div>
               )}
             {fileChips}
+            {modelPicker}
             <form
               className="claude-composer"
               onSubmit={(e) => {
