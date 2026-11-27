@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import { ClaudeLogo } from "./ClaudeLogo";
-
+import type { Agent } from "./agents";
 import type { ModelChoice } from "./claudeBridge";
 
 const Glyph = ({ d }: { d: string }) => (
@@ -22,6 +21,7 @@ const Glyph = ({ d }: { d: string }) => (
 
 /** which model answers, chosen from what the connected account offers */
 export const ModelPicker = ({
+  agent,
   models,
   selected,
   connected,
@@ -29,6 +29,7 @@ export const ModelPicker = ({
   onSelect,
   onConnect,
 }: {
+  agent: Agent;
   models: ModelChoice[];
   selected: ModelChoice | undefined;
   connected: boolean;
@@ -75,7 +76,7 @@ export const ModelPicker = ({
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
       >
-        <ClaudeLogo size={13} />
+        <agent.Logo size={13} />
         <span>{selected?.name ?? "Model"}</span>
         <Glyph d="m6 15 6-6 6 6" />
       </button>
@@ -105,8 +106,9 @@ export const ModelPicker = ({
           {!models.length &&
             (connected ? (
               <p className="claude-model-note">
-                The model list isn't available, so Claude uses your account's
-                default model. If you just updated, restart the Claude bridge.
+                The model list isn't available, so {agent.name} uses your
+                account's default model. If you just updated, restart the
+                bridge.
               </p>
             ) : (
               <button
@@ -118,7 +120,7 @@ export const ModelPicker = ({
                   onConnect();
                 }}
               >
-                <strong>Connect Claude</strong>
+                <strong>Connect {agent.name}</strong>
                 <small>to see the models your plan includes</small>
               </button>
             ))}

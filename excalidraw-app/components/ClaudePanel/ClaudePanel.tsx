@@ -8,7 +8,6 @@ import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 
 import { goToSignIn } from "../../plus/auth";
 
-import { ClaudeLogo } from "./ClaudeLogo";
 import { HistoryView, LogsView, formatSize } from "./ClaudeViews";
 import { Markdown } from "./Markdown";
 import { ModelPicker } from "./ModelPicker";
@@ -16,6 +15,7 @@ import {
   disconnect,
   getModels,
   getStatus,
+  openAgentTerminal,
   startLogin,
   streamChat,
   submitLoginCode,
@@ -25,13 +25,13 @@ import { applyOp, summarizeScene } from "./sceneOps";
 
 import "./ClaudePanel.scss";
 
+import type { Layout } from "./AgentHub";
+import type { Agent, AgentId } from "./agents";
 import type { BridgeStatus, ModelChoice } from "./claudeBridge";
 import type { Chat, LogBody, LogEvent, Message, ToolCall } from "./history";
 
-type Mode = "bar" | "panel";
 type View = "chat" | "logs" | "history";
 
-const PREFS_KEY = "excalidraw-claude-panel";
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
 const MAX_FILES = 5;
 const ACCEPT =
@@ -89,20 +89,23 @@ const TOOL_LABELS: Record<string, string> = {
   clear_canvas: "Clearing canvas",
 };
 
-type Prefs = { open: boolean; wide: boolean; mode: Mode; model: string };
-
-const loadPrefs = (): Prefs => {
+/** the saved model choice; Claude's used to live with the layout prefs */
+const loadModel = (agent: Agent): string => {
   try {
-    const raw = JSON.parse(localStorage.getItem(PREFS_KEY) || "{}");
-    return {
-      open: !!raw.open,
-      wide: !!raw.wide,
-      mode: raw.mode === "panel" ? "panel" : "bar",
-      model: typeof raw.model === "string" ? raw.model : "default",
-    };
-  } catch {
-    return { open: false, wide: false, mode: "bar", model: "default" };
-  }
+    const saved = localStorage.getItem(agent.modelKey);
+    if (saved) {
+      return saved;
+    }
+    if (agent.id === "claude") {
+      const old = JSON.parse(
+        localStorage.getItem("excalidraw-claude-panel") || "{}",
+      );
+      if (typeof old.model === "string") {
+        return old.model;
+      }
+    }
+  } catch {}
+  return "default";
 };
 
 const Icon = ({ d }: { d: string }) => (
@@ -164,14 +167,9 @@ const readFileAsBase64 = (file: File): Promise<string> =>
     reader.readAsDataURL(file);
   });
 
-/** the Claude starburst */
-const ClaudeMark = ({ size = 18 }: { size?: number }) => (
-  <ClaudeLogo size={size} />
-);
-
 const SPINNER_FRAMES = ["·", "✢", "✳", "✶", "✻", "✽", "✻", "✶", "✳", "✢"];
 
-/** Claude Code's cycling spinner glyph */
+/** a cycling spinner glyph, as in the CLIs */
 const Spinner = () => {
   const [frame, setFrame] = useState(0);
   useEffect(() => {
@@ -199,7 +197,13 @@ const patchCall = (
 const oneLine = (text: string) => text.replace(/\s+/g, " ").trim();
 
 /** sign-in to the user's own Claude account: open the link, paste the code */
-const ConnectCard = ({ onConnected }: { onConnected: () => void }) => {
+const ConnectCard = ({
+  agent,
+  onConnected,
+}: {
+  agent: Agent;
+  onConnected: () => void;
+}) => {
   const [url, setUrl] = useState<string | null>(null);
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
@@ -211,7 +215,7 @@ const ConnectCard = ({ onConnected }: { onConnected: () => void }) => {
     // open synchronously so the popup isn't blocked, point it once we have the URL
     const popup = window.open("", "_blank");
     try {
-      const authUrl = await startLogin();
+      const authUrl = await startLogin(agent.base);
       setUrl(authUrl);
       if (popup) {
         popup.location.href = authUrl;
@@ -227,7 +231,7 @@ const ConnectCard = ({ onConnected }: { onConnected: () => void }) => {
     setBusy(true);
     setError("");
     try {
-      await submitLoginCode(code.trim());
+      await submitLoginCode(agent.base, code.trim());
       onConnected();
     } catch (e: any) {
       setError(e.message);
@@ -242,7 +246,7 @@ const ConnectCard = ({ onConnected }: { onConnected: () => void }) => {
 
   return (
     <div className="claude-connect">
-      <ClaudeMark size={36} />
+      <agent.Logo size={36} />
       <h3>Connect your Claude account</h3>
       <p>
         Claude uses <b>your own</b> Claude subscription. You only do this once.
@@ -278,6 +282,75 @@ const ConnectCard = ({ onConnected }: { onConnected: () => void }) => {
             </button>
           </li>
         </ol>
+      )}
+      {error && <div className="claude-connect-error">{error}</div>}
+    </div>
+  );
+};
+
+/**
+ * Antigravity sign-in happens in its own CLI, on the bridge's machine: open a
+ * terminal there, then watch for the login to appear.
+ */
+const AntigravityConnectCard = ({
+  agent,
+  installed,
+  onCheck,
+}: {
+  agent: Agent;
+  installed: boolean;
+  onCheck: () => void;
+}) => {
+  const [waiting, setWaiting] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!waiting) {
+      return;
+    }
+    const id = window.setInterval(onCheck, 4000);
+    return () => window.clearInterval(id);
+  }, [waiting, onCheck]);
+
+  const begin = async () => {
+    setError("");
+    try {
+      await openAgentTerminal(agent.base, "login");
+      setWaiting(true);
+    } catch (e: any) {
+      setError(e.message);
+    }
+  };
+
+  return (
+    <div className="claude-connect">
+      <agent.Logo size={36} />
+      <h3>Sign in to Antigravity</h3>
+      {installed ? (
+        <>
+          <p>
+            Antigravity uses <b>your own</b> Antigravity sign-in, through the{" "}
+            <code>agy</code> CLI on this computer.
+          </p>
+          <button className="claude-primary" onClick={begin}>
+            {waiting ? "Open the terminal again" : "Sign in with Antigravity"}
+          </button>
+          {waiting && (
+            <p className="claude-shimmer">
+              Finish signing in in the terminal window. This updates on its own.
+            </p>
+          )}
+        </>
+      ) : (
+        <>
+          <p>
+            Install the Antigravity CLI (<code>agy</code>) on the computer that
+            runs the bridge, then check again.
+          </p>
+          <button className="claude-primary" onClick={onCheck}>
+            Check again
+          </button>
+        </>
       )}
       {error && <div className="claude-connect-error">{error}</div>}
     </div>
@@ -423,19 +496,33 @@ const ThinkingBlock = ({
   );
 };
 
+/** one assistant's chat: the bottom bar or the side panel */
 export const ClaudePanel = ({
+  agent,
+  active,
+  layout,
+  onLayout,
+  onBusyChange,
   excalidrawAPI,
   theme,
 }: {
+  agent: Agent;
+  /** whether this is the assistant picked on the plate */
+  active: boolean;
+  layout: Layout;
+  onLayout: (patch: Partial<Layout>) => void;
+  onBusyChange: (id: AgentId, busy: boolean) => void;
   excalidrawAPI: ExcalidrawImperativeAPI;
   theme: "light" | "dark";
 }) => {
-  const [prefs, setPrefs] = useState(loadPrefs);
-  const { open, wide, mode } = prefs;
+  const { wide, mode } = layout;
+  const open = active && layout.open;
+  const { name } = agent;
+  const [modelPref, setModelPref] = useState(() => loadModel(agent));
   const [view, setView] = useState<View>("chat");
   const [messages, setMessages] = useState<Message[]>([]);
   const [logs, setLogs] = useState<LogEvent[]>([]);
-  const [chats, setChats] = useState<Chat[]>(loadChats);
+  const [chats, setChats] = useState<Chat[]>(() => loadChats(agent.historyKey));
   const [chatId, setChatId] = useState(newChatId);
   /** user-message id of the checkpoint shown in the bar (null = latest) */
   const [focusId, setFocusId] = useState<number | null>(null);
@@ -448,11 +535,11 @@ export const ClaudePanel = ({
   const [status, setStatus] = useState<BridgeStatus | null>(null);
   const ready = status?.state === "ok" && status.loggedIn;
   const owner =
-    ready && status.state === "ok" ? status.email || "claude" : null;
+    ready && status.state === "ok" ? status.email || agent.id : null;
   const plan = status?.state === "ok" ? status.plan : null;
   const [models, setModels] = useState<ModelChoice[]>([]);
   // a saved choice this account doesn't offer falls back to the first
-  const model = models.find((m) => m.value === prefs.model) ?? models[0];
+  const model = models.find((m) => m.value === modelPref) ?? models[0];
   const sessionId = useRef<string | undefined>(undefined);
   const abortRef = useRef<AbortController | null>(null);
   const nextId = useRef(1);
@@ -465,36 +552,56 @@ export const ClaudePanel = ({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
-  const updatePrefs = useCallback((patch: Partial<typeof prefs>) => {
-    setPrefs((p) => {
-      const next = { ...p, ...patch };
-      try {
-        localStorage.setItem(PREFS_KEY, JSON.stringify(next));
-      } catch {}
-      return next;
-    });
-  }, []);
+  const refreshStatus = useCallback(
+    async (fresh = false) => setStatus(await getStatus(agent.base, fresh)),
+    [agent],
+  );
 
-  // the corner icon is always on screen, so always know the connection state
+  const checkStatus = useCallback(() => refreshStatus(), [refreshStatus]);
+
   useEffect(() => {
     let cancelled = false;
     const poll = async () => {
-      const next = await getStatus();
+      const next = await getStatus(agent.base);
       if (!cancelled) {
         setStatus(next);
       }
     };
-    poll();
+    if (!status) {
+      poll();
+    }
     // keep retrying while the bridge is down so it recovers on its own
     const id = window.setInterval(
-      () => (!status || status.state === "offline") && poll(),
+      () => status?.state === "offline" && poll(),
       3000,
     );
     return () => {
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [status]);
+  }, [status, agent]);
+
+  // after a sign-out was started in the terminal, wait for it to take effect
+  const [signingOut, setSigningOut] = useState(false);
+  useEffect(() => {
+    if (!signingOut) {
+      return;
+    }
+    if (!ready) {
+      setSigningOut(false);
+      return;
+    }
+    const id = window.setInterval(() => refreshStatus(true), 8000);
+    const stopWaiting = window.setTimeout(() => setSigningOut(false), 120000);
+    return () => {
+      window.clearInterval(id);
+      window.clearTimeout(stopWaiting);
+    };
+  }, [signingOut, ready, refreshStatus]);
+
+  useEffect(() => {
+    onBusyChange(agent.id, busy);
+  }, [agent, busy, onBusyChange]);
 
   // each account has its own model list
   useEffect(() => {
@@ -503,11 +610,11 @@ export const ClaudePanel = ({
       return;
     }
     let cancelled = false;
-    getModels().then((next) => !cancelled && setModels(next));
+    getModels(agent.base).then((next) => !cancelled && setModels(next));
     return () => {
       cancelled = true;
     };
-  }, [owner]);
+  }, [owner, agent]);
 
   const scrollToLatest = useCallback(() => {
     stickRef.current = true;
@@ -584,8 +691,14 @@ export const ClaudePanel = ({
       isFirstLayout.current = false;
       return;
     }
+    // only the chat in front moves the canvas
+    if (!active) {
+      return;
+    }
     const id = window.setTimeout(fitDrawing, 300);
     return () => window.clearTimeout(id);
+    // switching assistants changes `active`, not the layout: don't refit then
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [panelShown, wide, fitDrawing]);
 
   // keep this chat in the saved history
@@ -608,12 +721,12 @@ export const ClaudePanel = ({
           logs,
         };
         const next = [chat, ...prev.filter((c) => c.id !== chatId)];
-        saveChats(next);
+        saveChats(agent.historyKey, next);
         return next;
       });
     }, 400);
     return () => window.clearTimeout(id);
-  }, [messages, logs, owner, chatId]);
+  }, [messages, logs, owner, chatId, agent]);
 
   const ownChats = chats
     .filter((c) => c.owner === owner)
@@ -688,7 +801,7 @@ export const ClaudePanel = ({
     }
     if (!ready) {
       // the connect / sign-in cards live in the side panel
-      updatePrefs({ open: true, mode: "panel" });
+      onLayout({ open: true, mode: "panel" });
       return;
     }
     stickRef.current = true;
@@ -736,6 +849,7 @@ export const ClaudePanel = ({
         })),
       );
       await streamChat(
+        agent.base,
         {
           message,
           sessionId: sessionId.current,
@@ -907,7 +1021,7 @@ export const ClaudePanel = ({
   const deleteChat = (id: string) => {
     setChats((prev) => {
       const next = prev.filter((c) => c.id !== id);
-      saveChats(next);
+      saveChats(agent.historyKey, next);
       return next;
     });
     if (id === chatId) {
@@ -921,7 +1035,7 @@ export const ClaudePanel = ({
     }
     setChats((prev) => {
       const next = prev.filter((c) => c.owner !== owner);
-      saveChats(next);
+      saveChats(agent.historyKey, next);
       return next;
     });
     resetChat();
@@ -959,11 +1073,28 @@ export const ClaudePanel = ({
     });
   };
 
-  const signOutOfClaude = async () => {
+  const signOut = async () => {
+    if (agent.id === "antigravity") {
+      if (
+        !window.confirm(
+          "Signing out also signs you out of the Antigravity CLI. A terminal will open: type /logout there. Continue?",
+        )
+      ) {
+        return;
+      }
+      stop();
+      try {
+        await openAgentTerminal(agent.base, "logout");
+        setSigningOut(true);
+      } catch (e: any) {
+        window.alert(e.message);
+      }
+      return;
+    }
     stop();
-    await disconnect();
+    await disconnect(agent.base);
     resetChat();
-    setStatus(await getStatus());
+    await refreshStatus();
   };
 
   const userMessages = messages.filter((m) => m.role === "user");
@@ -999,7 +1130,7 @@ export const ClaudePanel = ({
 
   const mark = (cls?: string) => (
     <span className={clsx("claude-avatar", cls)}>
-      <ClaudeMark size={16} />
+      <agent.Logo size={16} />
     </span>
   );
 
@@ -1056,17 +1187,21 @@ export const ClaudePanel = ({
 
   const modelPicker = (
     <ModelPicker
+      agent={agent}
       models={models}
       selected={model}
       connected={!!ready}
       plan={ready ? plan : null}
       onSelect={(value) => {
-        updatePrefs({ model: value });
+        setModelPref(value);
+        try {
+          localStorage.setItem(agent.modelKey, value);
+        } catch {}
         inputRef.current?.focus();
       }}
       onConnect={() => {
         setView("chat");
-        updatePrefs({ open: true, mode: "panel" });
+        onLayout({ open: true, mode: "panel" });
       }}
     />
   );
@@ -1095,7 +1230,8 @@ export const ClaudePanel = ({
 
   return (
     <div
-      className={clsx("claude-root", `theme-${theme}`)}
+      className={clsx("claude-root", `agent-${agent.id}`, `theme-${theme}`)}
+      hidden={!active}
       onKeyDown={keepKeysInChat}
     >
       <input
@@ -1110,24 +1246,12 @@ export const ClaudePanel = ({
         }}
       />
 
-      {/* when closed, the corner icon is all that's left on screen */}
-      {!open && (
-        <button
-          className={clsx("claude-fab", { busy })}
-          onClick={() => updatePrefs({ open: true })}
-          title="Open Claude"
-          aria-label="Open Claude"
-        >
-          <ClaudeMark size={22} />
-        </button>
-      )}
-
       {/* bottom chat: the current exchange, with earlier prompts stacked behind */}
       {open && mode === "bar" && (
         <div
           className={clsx("claude-bar", { dragging })}
           role="dialog"
-          aria-label="Claude"
+          aria-label={name}
           // clicks on plain areas focus the chat, not the canvas
           tabIndex={-1}
           {...dropProps}
@@ -1174,11 +1298,11 @@ export const ClaudePanel = ({
             <button
               type="button"
               className="claude-bar-lines claude-bar-setup"
-              onClick={() => updatePrefs({ mode: "panel" })}
+              onClick={() => onLayout({ mode: "panel" })}
             >
               {status?.state === "offline"
-                ? "Claude bridge isn't running — open the side panel for help"
-                : "Connect Claude to start — open the side panel"}
+                ? "The bridge isn't running — open the side panel for help"
+                : `Connect ${name} to start — open the side panel`}
             </button>
           )}
           {ready && (shownUser || shownClaude) && (
@@ -1282,8 +1406,8 @@ export const ClaudePanel = ({
             <input
               className="claude-field"
               value={input}
-              placeholder="Ask Claude to draw or edit…"
-              aria-label="Message Claude"
+              placeholder={`Ask ${name} to draw or edit…`}
+              aria-label={`Message ${name}`}
               onChange={(e) => setInput(e.target.value)}
             />
             {attachButton}
@@ -1292,7 +1416,7 @@ export const ClaudePanel = ({
               className="claude-icon-btn"
               title="Switch to the side panel (chat, logs, history)"
               aria-label="Switch to the side panel"
-              onClick={() => updatePrefs({ mode: "panel" })}
+              onClick={() => onLayout({ mode: "panel" })}
             >
               <Icon d={ICON.panel} />
             </button>
@@ -1300,8 +1424,8 @@ export const ClaudePanel = ({
               type="button"
               className="claude-icon-btn"
               title="Close"
-              aria-label="Close Claude"
-              onClick={() => updatePrefs({ open: false })}
+              aria-label={`Close ${name}`}
+              onClick={() => onLayout({ open: false })}
             >
               <Icon d={ICON.close} />
             </button>
@@ -1319,14 +1443,14 @@ export const ClaudePanel = ({
           role="complementary"
           // clicks on plain areas focus the chat, not the canvas
           tabIndex={-1}
-          aria-label="Claude chat"
+          aria-label={`${name} chat`}
           {...dropProps}
         >
           <header className="claude-header">
             <div className="claude-title">
               {mark("lg")}
               <div>
-                <strong>Claude</strong>
+                <strong>{name}</strong>
                 <small
                   className={clsx("claude-status", {
                     up: ready,
@@ -1339,8 +1463,10 @@ export const ClaudePanel = ({
                     ? "bridge offline"
                     : status.state === "signin_required"
                     ? "sign in required"
+                    : status.unsupported
+                    ? "not available here"
                     : status.loggedIn
-                    ? status.email || "your Claude account"
+                    ? status.email || `your ${name} account`
                     : "not connected"}
                 </small>
               </div>
@@ -1358,30 +1484,30 @@ export const ClaudePanel = ({
                 className="claude-wide-toggle"
                 title={wide ? "Narrower" : "Wider"}
                 aria-label={wide ? "Narrower" : "Wider"}
-                onClick={() => updatePrefs({ wide: !wide })}
+                onClick={() => onLayout({ wide: !wide })}
               >
                 <Icon d={wide ? ICON.narrower : ICON.wider} />
               </button>
               <button
                 title="Switch to the bottom chat"
                 aria-label="Switch to the bottom chat"
-                onClick={() => updatePrefs({ mode: "bar" })}
+                onClick={() => onLayout({ mode: "bar" })}
               >
                 <Icon d={ICON.bar} />
               </button>
               {ready && (
                 <button
-                  title="Disconnect Claude account"
-                  aria-label="Disconnect Claude account"
-                  onClick={signOutOfClaude}
+                  title={`Disconnect ${name} account`}
+                  aria-label={`Disconnect ${name} account`}
+                  onClick={signOut}
                 >
                   <Icon d={ICON.signOut} />
                 </button>
               )}
               <button
                 title="Close"
-                aria-label="Close Claude"
-                onClick={() => updatePrefs({ open: false })}
+                aria-label={`Close ${name}`}
+                onClick={() => onLayout({ open: false })}
               >
                 <Icon d={ICON.close} />
               </button>
@@ -1421,20 +1547,21 @@ export const ClaudePanel = ({
               <>
                 {status?.state === "offline" && (
                   <div className="claude-banner">
-                    <strong>Claude bridge isn't running</strong>
+                    <strong>The bridge isn't running</strong>
                     <p>
                       Self-hosted? Make sure the <code>claude-bridge</code>{" "}
-                      service is up. Running locally? In a terminal:
+                      service is up. Running locally? Start (or, after an
+                      update, restart) it in a terminal:
                     </p>
                     <code>cd claude-bridge && yarn install && yarn start</code>
                   </div>
                 )}
                 {status?.state === "signin_required" && (
                   <div className="claude-connect">
-                    <ClaudeMark size={36} />
-                    <h3>Sign in to use Claude</h3>
+                    <agent.Logo size={36} />
+                    <h3>Sign in to use {name}</h3>
                     <p>
-                      Sign in to your account first, then connect your Claude
+                      Sign in to your account first, then connect your {name}{" "}
                       plan.
                     </p>
                     <button
@@ -1445,14 +1572,28 @@ export const ClaudePanel = ({
                     </button>
                   </div>
                 )}
-                {status?.state === "ok" && !status.loggedIn && (
-                  <ConnectCard
-                    onConnected={async () => setStatus(await getStatus())}
-                  />
-                )}
+                {status?.state === "ok" &&
+                  !status.loggedIn &&
+                  (status.unsupported ? (
+                    <div className="claude-banner">
+                      <strong>{name} isn't available here</strong>
+                      <p>{status.unsupported}</p>
+                    </div>
+                  ) : agent.id === "antigravity" ? (
+                    <AntigravityConnectCard
+                      agent={agent}
+                      installed={status.installed !== false}
+                      onCheck={checkStatus}
+                    />
+                  ) : (
+                    <ConnectCard
+                      agent={agent}
+                      onConnected={() => refreshStatus()}
+                    />
+                  ))}
                 {ready && !messages.length && (
                   <div className="claude-empty">
-                    <ClaudeMark size={36} />
+                    <agent.Logo size={36} />
                     <h3>What shall we draw?</h3>
                     <p>
                       Describe it, or attach a document, and I'll build it on
@@ -1597,11 +1738,11 @@ export const ClaudePanel = ({
                 value={input}
                 rows={1}
                 // never disabled: keys typed at a dead field would hit the canvas
-                aria-label="Message Claude"
+                aria-label={`Message ${name}`}
                 placeholder={
                   ready
-                    ? "Ask Claude to draw or edit…"
-                    : "Connect Claude to start…"
+                    ? `Ask ${name} to draw or edit…`
+                    : `Connect ${name} to start…`
                 }
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => {

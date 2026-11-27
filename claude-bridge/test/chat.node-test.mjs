@@ -3,6 +3,7 @@ import { describe, test } from "node:test";
 
 import {
   buildUserContent,
+  findLoginUrl,
   MAX_ATTACHMENT_BYTES,
   translateMessage,
   validateAttachments,
@@ -245,4 +246,21 @@ test("model list becomes picker rows without per-token prices", () => {
   );
   assert.equal(isModelId("claude-fable-5-2[1m]"), true);
   assert.equal(isModelId("--flag"), false);
+});
+
+describe("sign-in link", () => {
+  const url = "https://claude.com/cai/oauth/authorize?code=true&state=abc-_1";
+
+  test("reads a plain link", () => {
+    assert.equal(findLoginUrl(`visit: ${url}\nPaste code > `), url);
+  });
+
+  test("drops terminal hyperlink escape codes", () => {
+    const linked = `\x1b]8;;${url}\x07${url}\x1b]8;;\x07`;
+    assert.equal(findLoginUrl(`visit: ${linked}\n`), url);
+  });
+
+  test("waits for the whole link", () => {
+    assert.equal(findLoginUrl(`visit: ${url.slice(0, -3)}`), null);
+  });
 });

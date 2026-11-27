@@ -106,6 +106,18 @@ export const buildUserContent = (promptText, attachments) => {
   return blocks;
 };
 
+// ends at whitespace or a control character: the CLI may wrap the link in an
+// OSC 8 terminal hyperlink (ESC ]8;;URL BEL URL ESC ]8;; BEL)
+const LOGIN_URL =
+  // eslint-disable-next-line no-control-regex
+  /https:\/\/[^\s\x00-\x1f\x7f]*(?:claude\.ai|claude\.com|anthropic\.com)[^\s\x00-\x1f\x7f]*(?=[\s\x00-\x1f\x7f])/;
+
+/**
+ * The sign-in link in `claude auth login` output, or null until the whole link
+ * has been printed.
+ */
+export const findLoginUrl = (output) => output.match(LOGIN_URL)?.[0] ?? null;
+
 const MODEL_ID = /^[a-zA-Z0-9][\w.:/[\]-]{0,99}$/;
 export const isModelId = (value) =>
   typeof value === "string" && MODEL_ID.test(value);

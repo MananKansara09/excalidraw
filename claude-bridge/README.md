@@ -21,3 +21,16 @@ yarn start                   # the app; /claude-bridge is proxied by Vite
 
 - `POST /chat` accepts `attachments: [{ name, mediaType, data }]` (base64): up to 5 files, **5 MB each**. PDFs and images go to Claude as document/image blocks; text files (txt, md, csv, json, code…) are inlined. Word/Excel files must be exported to PDF/CSV first. Claude still gets no file or shell tools.
 - The event stream also carries `tool_use` (full input), `tool_result`, and `done` stats, which the panel's **Logs** tab shows. `yarn test` runs the helper tests.
+
+## Antigravity
+
+The same bridge powers the **Antigravity** chat, picked from the plate at the bottom of the canvas. It runs your own [Antigravity CLI](https://antigravity.google/docs/cli/headless/) (`agy`) in headless stream-json mode, so requests use **your Antigravity sign-in**. The Python Antigravity SDK is not used: it only accepts a Gemini API key or Vertex AI.
+
+- **Run** (from the repo root): `yarn start:antigravity-bridge`, or `yarn dev:antigravity-bridge` to restart on file changes. These are the Claude bridge's commands under another name: one process on port 3016 serves both chats, so run only one of them.
+- **Sign-in / sign-out**: the panel opens a terminal running `agy` on the bridge's machine. Sign in there, or type `/logout`.
+- **Canvas edits**: the bridge serves the canvas tools to `agy` as an MCP server. Each turn has a new secret address.
+- **Lockdown**: `agy` runs in `~/.excalidraw-antigravity`, where a `PreToolUse` hook (`antigravity-guard.mjs`) refuses every tool except the canvas ones and reading uploaded files. Permission rules also deny commands, file writes and URL access, and a turn is stopped if a refused tool ever runs.
+- **Attachments**: text files are inlined; images and PDFs are saved to the work folder for the turn, then deleted.
+- `agy` takes no system prompt (it opens each new conversation) and streams no thinking text.
+- **Local mode only**: `agy` keeps its login in the OS keyring, so a shared (multiuser) server shows the panel as unavailable.
+- Settings: `AGY_BIN`, `ANTIGRAVITY_WORK_DIR`. Routes are under `/claude-bridge/antigravity/`.

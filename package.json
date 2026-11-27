@@ -98,6 +98,8 @@
     "start:plus-server": "yarn --cwd ./plus-server start",
     "install:claude-bridge": "yarn --cwd ./claude-bridge install",
     "start:claude-bridge": "yarn --cwd ./claude-bridge start",
+    "start:antigravity-bridge": "yarn start:claude-bridge",
+    "dev:antigravity-bridge": "yarn dev:claude-bridge",
     "dev:frontend": "yarn --cwd ./excalidraw-app vite",
     "dev:claude-bridge": "nodemon --watch claude-bridge --ext mjs,js,json --ignore claude-bridge/node_modules --exec node claude-bridge/server.mjs",
     "dev:plus-server": "nodemon --watch plus-server/src --ext ts,js,json --exec node plus-server/src/index.ts",

@@ -38,8 +38,6 @@ type Handlers = {
   onDone: (stats?: DoneStats) => void;
 };
 
-const BASE = "/claude-bridge";
-
 export type BridgeStatus =
   | {
       state: "ok";
@@ -47,15 +45,19 @@ export type BridgeStatus =
       email: string | null;
       /** subscription tier, e.g. "pro" or "max" */
       plan?: string | null;
+      /** false when the agent's CLI is missing on the bridge's machine */
+      installed?: boolean;
+      /** why this bridge can't offer the agent at all */
+      unsupported?: string;
     }
   | { state: "signin_required" }
   | { state: "offline" };
 
 const OFFLINE_MESSAGE =
-  "Can't reach the Claude bridge. Start it with `cd claude-bridge && yarn install && yarn start`.";
+  "Can't reach the bridge. Start (or restart) it with `cd claude-bridge && yarn install && yarn start`.";
 
-const post = async (path: string, body?: unknown) => {
-  const res = await fetch(`${BASE}${path}`, {
+const post = async (url: string, body?: unknown) => {
+  const res = await fetch(url, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body ?? {}),
@@ -67,9 +69,15 @@ const post = async (path: string, body?: unknown) => {
   return { ok: res.ok, status: res.status, json };
 };
 
-export const getStatus = async (): Promise<BridgeStatus> => {
+/** `base` is the agent's address; `fresh` skips the bridge's cached answer */
+export const getStatus = async (
+  base: string,
+  fresh = false,
+): Promise<BridgeStatus> => {
   try {
-    const res = await fetch(`${BASE}/status`, { cache: "no-store" });
+    const res = await fetch(`${base}/status${fresh ? "?fresh=1" : ""}`, {
+      cache: "no-store",
+    });
     if (res.status === 401) {
       return { state: "signin_required" };
     }
@@ -82,6 +90,8 @@ export const getStatus = async (): Promise<BridgeStatus> => {
       loggedIn: !!json.loggedIn,
       email: json.email ?? null,
       plan: json.plan ?? null,
+      installed: json.installed,
+      unsupported: json.unsupported,
     };
   } catch {
     return { state: "offline" };
@@ -95,9 +105,9 @@ export type ModelChoice = {
 };
 
 /** the models the connected account can use; empty when they can't be read */
-export const getModels = async (): Promise<ModelChoice[]> => {
+export const getModels = async (base: string): Promise<ModelChoice[]> => {
   try {
-    const res = await fetch(`${BASE}/models`, { cache: "no-store" });
+    const res = await fetch(`${base}/models`, { cache: "no-store" });
     const json = res.ok ? await res.json() : null;
     return Array.isArray(json?.models) ? json.models : [];
   } catch {
@@ -106,8 +116,8 @@ export const getModels = async (): Promise<ModelChoice[]> => {
 };
 
 /** starts `claude auth login`: returns the page the user must authorize on */
-export const startLogin = async (): Promise<string> => {
-  const { ok, json } = await post("/auth/login");
+export const startLogin = async (base: string): Promise<string> => {
+  const { ok, json } = await post(`${base}/auth/login`);
   if (!ok || !json?.url) {
     throw new Error(json?.error || "Couldn't start the Claude sign-in.");
   }
@@ -115,19 +125,31 @@ export const startLogin = async (): Promise<string> => {
 };
 
 /** completes the login with the code shown after authorizing */
-export const submitLoginCode = async (code: string) => {
-  const { ok, json } = await post("/auth/code", { code });
+export const submitLoginCode = async (base: string, code: string) => {
+  const { ok, json } = await post(`${base}/auth/code`, { code });
   if (!ok) {
     throw new Error(json?.error || "That code didn't work.");
   }
 };
 
-export const disconnect = async () => {
-  await post("/auth/logout");
+/** Antigravity signs in and out in its own CLI: the bridge opens a terminal */
+export const openAgentTerminal = async (
+  base: string,
+  action: "login" | "logout",
+) => {
+  const { ok, json } = await post(`${base}/auth/${action}`);
+  if (!ok) {
+    throw new Error(json?.error || "Couldn't open a terminal.");
+  }
+};
+
+export const disconnect = async (base: string) => {
+  await post(`${base}/auth/logout`);
 };
 
 /** POSTs a chat turn and dispatches the server-sent events as they arrive */
 export const streamChat = async (
+  base: string,
   body: {
     message: string;
     sessionId?: string;
@@ -140,7 +162,7 @@ export const streamChat = async (
 ) => {
   let res: Response;
   try {
-    res = await fetch(`${BASE}/chat`, {
+    res = await fetch(`${base}/chat`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
@@ -228,7 +250,7 @@ export const streamChat = async (
     }
   } catch (e: any) {
     if (e?.name !== "AbortError") {
-      handlers.onError("The connection to the Claude bridge was interrupted.");
+      handlers.onError("The connection to the bridge was interrupted.");
     }
   }
 };

@@ -14,6 +14,9 @@
  *      Claude config dir under CLAUDE_BRIDGE_DATA and signs in to their own
  *      Claude account from the UI (`claude auth login`, code pasted back).
  *
+ * It also serves the "Antigravity" panel under /claude-bridge/antigravity/*,
+ * see antigravity.mjs.
+ *
  * Claude can't touch files or run commands here: all built-in tools are
  * disabled. The only tools it gets draw on the canvas (the browser applies
  * them), see `buildTools`.
@@ -30,8 +33,11 @@ import {
   tool,
 } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
+import { createAntigravity } from "./antigravity.mjs";
+import { CANVAS_TOOLS, summarizeScene, systemPrompt } from "./canvas.mjs";
 import {
   buildUserContent,
+  findLoginUrl,
   isModelId,
   MAX_CHAT_BODY,
   toModelChoices,
@@ -62,21 +68,7 @@ if (MULTIUSER && SECRET.length < 16) {
   process.exit(1);
 }
 
-const SYSTEM_PROMPT = `You are Claude, built into the Excalidraw whiteboard. You help the user create and edit diagrams and scenes on the canvas.
-
-You draw by calling the excalidraw tools; the user sees results live. Prefer drawing over describing. After drawing, reply with ONE or TWO short sentences.
-
-Element rules (Excalidraw "skeleton" format):
-- types: rectangle, ellipse, diamond, text, arrow, line, frame.
-- Always give every element a short unique "id" (e.g. "db1") so arrows can bind and you can update/delete later.
-- Shapes: {type, id, x, y, width, height, strokeColor?, backgroundColor?, fillStyle?: "solid"|"hachure"|"cross-hatch", roughness?: 0|1|2, strokeStyle?: "solid"|"dashed"|"dotted", label?: {text, fontSize?}}. A "label" puts centered text inside the shape - use it instead of separate text elements.
-- Free text: {type:"text", id, x, y, text, fontSize?, strokeColor?}.
-- Arrows/lines: {type:"arrow", id, x, y, start?: {id:"<element id>"}, end?: {id:"<element id>"}, label?: {text}, endArrowhead?: "arrow"|"triangle"|null}. When start/end reference ids, omit width/height; the arrows connect and route themselves. For unbound arrows give x,y and width,height (dx,dy).
-- Coordinates: pixels, origin top-left, y grows downward. Lay diagrams out on a clean grid. Leave 60-100px gaps, but at least 200px between shapes joined by a LABELED arrow (the label sits on the arrow), boxes about 160x70 (wider for long labels). Start near the existing content's free area (see the scene summary) or at (0,0) on an empty canvas.
-- Use a consistent, tasteful palette (e.g. fills #a5d8ff, #b2f2bb, #ffec99, #ffc9c9, #d0bfff with stroke #1e1e1e).
-- Add a title text above bigger diagrams. Draw in as few tool calls as possible (batch all elements in one add_elements call; create referenced shapes in the same batch).
-- To change existing elements use update_elements with their ids from the scene summary; to remove use delete_elements.
-When the user attaches files (PDFs, images, text), read them and apply them to the canvas as asked: turn a document into a diagram or slides, redraw a screenshot, follow instructions written in it. Summarize rather than copy long passages.
+const SYSTEM_PROMPT = `${systemPrompt("Claude")}
 You cannot read files from disk or run commands. If asked for something unrelated to drawing, answer briefly.`;
 
 const sendJson = (res, status, body) => {
@@ -151,24 +143,6 @@ const buildTools = (emit) => {
       ),
     ],
   });
-};
-
-const summarizeScene = (scene) => {
-  if (!scene || !Array.isArray(scene.elements) || !scene.elements.length) {
-    return "The canvas is currently empty.";
-  }
-  const lines = scene.elements
-    .slice(0, 200)
-    .map((e) => JSON.stringify(e))
-    .join("\n");
-  const more =
-    scene.elements.length > 200
-      ? `\n(+${scene.elements.length - 200} more not shown)`
-      : "";
-  const sel = scene.selectedIds?.length
-    ? `\nCurrently selected ids: ${scene.selectedIds.join(", ")}`
-    : "";
-  return `Current canvas (one JSON per line: id,type,x,y,w,h,text,...):\n${lines}${more}${sel}`;
 };
 
 // per-user identity & isolation -----------------------------------------------
@@ -349,12 +323,10 @@ const startLogin = (user) =>
     let done = false;
     const onData = (d) => {
       entry.output += d;
-      const m = entry.output.match(
-        /https:\/\/\S*(?:claude\.ai|claude\.com|anthropic\.com)\S*/,
-      );
-      if (m && !done) {
+      const url = findLoginUrl(entry.output);
+      if (url && !done) {
         done = true;
-        resolve(m[0]);
+        resolve(url);
       }
     };
     proc.stdout.on("data", onData);
@@ -460,12 +432,6 @@ const handleChat = async (req, res, user) => {
   const abort = new AbortController();
   res.on("close", () => abort.abort());
 
-  const toolNames = [
-    "add_elements",
-    "update_elements",
-    "delete_elements",
-    "clear_canvas",
-  ];
   const promptText = `${summarizeScene(
     scene,
   )}\n\n---\nUser request:\n${message}`;
@@ -504,7 +470,7 @@ const handleChat = async (req, res, user) => {
         settingSources: [],
         tools: [],
         mcpServers: { excalidraw: buildTools(emit) },
-        allowedTools: toolNames.map((n) => `mcp__excalidraw__${n}`),
+        allowedTools: CANVAS_TOOLS.map((n) => `mcp__excalidraw__${n}`),
         permissionMode: "dontAsk",
         includePartialMessages: true,
         maxTurns: 12,
@@ -551,6 +517,15 @@ const friendlyError = (code, detail) => {
   }
 };
 
+const handleAntigravity = createAntigravity({
+  prefix: PREFIX,
+  multiuser: MULTIUSER,
+  // where the local `agy` process reaches this bridge
+  mcpOrigin: `http://${HOST === "0.0.0.0" ? "127.0.0.1" : HOST}:${PORT}`,
+  sendJson,
+  readBody,
+});
+
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, "http://bridge");
@@ -579,6 +554,10 @@ const server = http.createServer(async (req, res) => {
     const user = identify(req);
     if (!user) {
       return sendJson(res, 401, { error: "Unauthorized" });
+    }
+
+    if (await handleAntigravity(req, res, url)) {
+      return;
     }
 
     if (req.method === "GET" && url.pathname === `${PREFIX}/status`) {

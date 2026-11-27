@@ -147,7 +147,7 @@ import { ExcalidrawPlusIframeExport } from "./ExcalidrawPlusIframeExport";
 import "./index.scss";
 
 import { AppSidebar } from "./components/AppSidebar";
-import { ClaudePanel } from "./components/ClaudePanel/ClaudePanel";
+import { AgentHub } from "./components/ClaudePanel/AgentHub";
 import { plusAPI } from "./plus/api";
 import { goToSignIn } from "./plus/auth";
 import { cloudSession, parseCloudHash } from "./plus/cloud";
@@ -1518,7 +1518,7 @@ const ExcalidrawWrapper = () => {
 
         <AppSidebar />
         {excalidrawAPI && !cloudScene?.embed && (
-          <ClaudePanel excalidrawAPI={excalidrawAPI} theme={editorTheme} />
+          <AgentHub excalidrawAPI={excalidrawAPI} theme={editorTheme} />
         )}
         <NotificationToastStack
           onSelectNotification={handleSelectNotification}

@@ -19,7 +19,7 @@ WORKDIR /app
 COPY claude-bridge/package.json ./
 RUN npm install --omit=dev --no-package-lock --no-audit --no-fund
 
-COPY claude-bridge/server.mjs claude-bridge/chat.mjs ./
+COPY claude-bridge/*.mjs ./
 
 # per-user Claude logins live here: keep it on a volume (and private)
 RUN mkdir -p /data && chown node:node /data

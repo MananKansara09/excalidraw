@@ -50,7 +50,7 @@ export type LogEvent = { id: number; at: number } & LogBody;
 
 export type Chat = {
   id: string;
-  /** the Claude account the chat belongs to, so shared browsers stay separate */
+  /** the account the chat belongs to, so shared browsers stay separate */
   owner: string;
   title: string;
   sessionId?: string;
@@ -60,13 +60,13 @@ export type Chat = {
   logs: LogEvent[];
 };
 
-const KEY = "excalidraw-claude-history";
 const MAX_CHATS = 40;
 const MAX_DETAIL = 4000;
 
-export const loadChats = (): Chat[] => {
+/** `key` keeps each assistant's chats apart */
+export const loadChats = (key: string): Chat[] => {
   try {
-    const parsed = JSON.parse(localStorage.getItem(KEY) || "[]");
+    const parsed = JSON.parse(localStorage.getItem(key) || "[]");
     return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
@@ -93,10 +93,10 @@ const shrink = (chat: Chat): Chat => ({
   }),
 });
 
-export const saveChats = (chats: Chat[]) => {
+export const saveChats = (key: string, chats: Chat[]) => {
   try {
     localStorage.setItem(
-      KEY,
+      key,
       JSON.stringify(
         [...chats]
           .sort((a, b) => b.updatedAt - a.updatedAt)

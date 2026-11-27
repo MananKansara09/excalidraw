@@ -117,6 +117,103 @@ $serif: ui-serif, "Iowan Old Style", "Palatino Linotype", Georgia, serif;
   }
 }
 
+// Antigravity wears its own blue
+.claude-root.agent-antigravity {
+  --cl-accent: #3186ff;
+  --cl-accent-strong: #1f6fe0;
+  --cl-accent-soft: rgba(49, 134, 255, 0.14);
+}
+
+.claude-root[hidden] {
+  display: none;
+}
+
+// the plate: every assistant, the picked one in front ------------------------
+
+.agent-dock {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  padding: 5px;
+  border-radius: 999px;
+  transform: translateX(-50%);
+  transition: left 0.25s ease;
+  @include glass;
+  box-shadow: var(--cl-shine), var(--cl-shadow), var(--cl-float);
+}
+
+// centred on the canvas left of the side panel
+@media (min-width: 641px) {
+  .agent-dock.beside-panel {
+    // never over the zoom and undo buttons in the corner
+    left: max(300px, calc(50% - 200px));
+    &.wide {
+      left: max(300px, calc((100% - min(620px, max(400px, 52vw))) / 2));
+    }
+  }
+}
+
+.claude-root .agent-chip {
+  --chip: #d97757;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 36px;
+  height: 36px;
+  padding: 0 7px;
+  border: 1px solid var(--cl-rim);
+  border-radius: 999px;
+  background: var(--cl-bg);
+  color: var(--cl-text);
+  font-size: 13px;
+  font-weight: 600;
+  // the others wait behind, tucked under the one in front
+  z-index: 1;
+  opacity: 0.7;
+  transform: scale(0.88);
+  transition: transform 0.2s ease, opacity 0.2s ease;
+  & + .agent-chip {
+    margin-left: -6px;
+  }
+  .claude-logo {
+    color: var(--chip);
+  }
+  &.agent-antigravity {
+    --chip: #3186ff;
+  }
+  &:hover {
+    opacity: 1;
+    transform: scale(0.96);
+  }
+  &.front {
+    z-index: 2;
+    opacity: 1;
+    padding: 0 14px 0 10px;
+    border-color: var(--chip);
+    transform: none;
+  }
+  &.open {
+    background: color-mix(in srgb, var(--chip) 16%, var(--cl-bg));
+  }
+  // answering, even while another assistant is in front
+  &.busy::after {
+    content: "";
+    position: absolute;
+    top: 1px;
+    right: 1px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--chip);
+    animation: claude-blink 1s ease-in-out infinite;
+  }
+}
+
 // shared bits -----------------------------------------------------------------
 
 .claude-avatar {
@@ -242,42 +339,13 @@ $serif: ui-serif, "Iowan Old Style", "Palatino Linotype", Georgia, serif;
 
 // corner icon -----------------------------------------------------------------
 
-.claude-root .claude-fab {
-  position: absolute;
-  right: 16px;
-  bottom: 16px;
-  z-index: 5;
-  display: grid;
-  place-items: center;
-  width: 48px;
-  height: 48px;
-  padding: 0;
-  border-radius: 16px;
-  color: var(--cl-accent);
-  @include glass;
-  box-shadow: var(--cl-shine), var(--cl-shadow), var(--cl-float);
-  animation: claude-pop 0.25s ease;
-  transition: transform 0.15s ease;
-  .claude-logo {
-    transition: transform 0.4s ease;
-  }
-  &:hover {
-    transform: translateY(-2px);
-    .claude-logo {
-      transform: rotate(45deg);
-    }
-  }
-  &.busy .claude-logo {
-    animation: claude-spin 2.4s linear infinite;
-  }
-}
-
 // one-line bar on the canvas --------------------------------------------------
 
 .claude-bar {
   position: absolute;
   left: 50%;
-  bottom: 16px;
+  // above the assistants' plate
+  bottom: 76px;
   z-index: 4;
   width: min(560px, calc(100% - 200px));
   transform: translateX(-50%);
@@ -1594,6 +1662,9 @@ $serif: ui-serif, "Iowan Old Style", "Palatino Linotype", Georgia, serif;
     left: 12px;
     width: calc(100% - 24px);
     transform: none;
+    bottom: 128px;
+  }
+  .agent-dock {
     bottom: 72px;
   }
   .claude-stack,

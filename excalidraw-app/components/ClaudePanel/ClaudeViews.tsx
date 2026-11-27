@@ -36,8 +36,8 @@ export const LogsView = ({ logs }: { logs: LogEvent[] }) => {
   if (!logs.length) {
     return (
       <div className="claude-log-empty">
-        Nothing logged yet. Tool calls, results and thinking appear here as
-        Claude works.
+        Nothing logged yet. Tool calls, results and thinking appear here as the
+        assistant works.
       </div>
     );
   }
